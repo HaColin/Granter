@@ -92,9 +92,10 @@
   {% for match in result.near_misses %}{{ card(match) }}{% endfor %}
 {% else %}<p class="none">None.</p>{% endif %}
 
-<h2>Worth checking if you have access</h2>
-<p class="meta">Granter does not search these — they are behind paywalls. It will not
-   pretend to have covered them.</p>
+<h2>Not searched — check these yourself</h2>
+<p class="meta">Granter has no feed for these. Some are behind paywalls; the rest are
+   free but publish nothing machine-readable, so they have to be browsed by hand.
+   Listing them is how you can tell what this search did <em>not</em> cover.</p>
 <ul>
   {% for ref in result.referrals %}
   <li><a href="{{ ref.url }}" target="_blank" rel="noopener">{{ ref.name }}</a>

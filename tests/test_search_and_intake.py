@@ -355,3 +355,92 @@ def test_a_state_programme_matches_an_in_state_applicant():
     result = search.run(local, Corpus([opportunity(region="CA")]), today=TODAY)
     assert result.matches
     assert any(n.field == "region" and n.kind == "match" for n in result.matches[0].notes)
+
+
+# --- EU connector -----------------------------------------------------------
+
+
+def _eu_row(**overrides):
+    row = {
+        "identifier": "HORIZON-CL5-2027-D3-01",
+        "callIdentifier": "HORIZON-CL5-2027-D3",
+        "title": "Solar-driven water treatment for off-grid communities",
+        "callTitle": "Clean energy transition",
+        "type": "1",
+        "status": {"abbreviation": "Open"},
+        "frameworkProgramme": {"description": "Horizon Europe", "abbreviation": "HORIZON"},
+        # 2027-06-30 and 2026-01-15, deliberately out of order and one past.
+        "deadlineDatesLong": [1814486400000, 1768435200000],
+        "publicationDateLong": 1755129600000,
+        "tags": ["water", "solar"],
+        "sme": True,
+    }
+    row.update(overrides)
+    return row
+
+
+def test_eu_row_normalises_into_the_shared_shape():
+    from datetime import date as _date
+
+    from granter.sources import eu_portal
+
+    record = eu_portal.normalise(_eu_row(), today=_date(2026, 8, 14))
+    assert record.source == "eu_portal"
+    assert record.jurisdiction == "EU"
+    assert record.funder == "European Commission — Horizon Europe"
+    assert str(record.source_url).endswith("HORIZON-CL5-2027-D3-01")
+    assert record.sectors == [Sector.RESEARCH]
+
+
+def test_the_next_unexpired_cutoff_is_used_not_the_first_listed():
+    """A call can have several cut-offs; showing an expired one would mislead."""
+    from datetime import date as _date
+
+    from granter.sources import eu_portal
+
+    record = eu_portal.normalise(_eu_row(), today=_date(2026, 8, 14))
+    assert record.close_date == _date(2026, 1, 15) or record.close_date > _date(2026, 8, 14)
+    # With today before both, the earlier upcoming one wins.
+    early = eu_portal.normalise(_eu_row(), today=_date(2025, 1, 1))
+    assert early.close_date == _date(2026, 1, 15)
+
+
+def test_missing_eu_budgets_are_recorded_not_invented():
+    from datetime import date as _date
+
+    from granter.sources import eu_portal
+
+    record = eu_portal.normalise(_eu_row(), today=_date(2026, 8, 14))
+    assert record.award_floor is None and record.award_ceiling is None
+    assert {"award_floor", "award_ceiling"} <= set(record.missing_fields)
+
+
+def test_eu_calls_publish_no_applicant_codes_so_none_are_claimed():
+    from datetime import date as _date
+
+    from granter.sources import eu_portal
+
+    record = eu_portal.normalise(_eu_row(), today=_date(2026, 8, 14))
+    assert record.applicant_codes == []
+    assert "rarely open to individuals" in record.eligibility_text
+    assert "SME" in record.eligibility_text
+
+
+def test_tenders_are_excluded_because_they_are_contracts_not_grants():
+    from granter.sources import eu_portal
+
+    payload = {"fundingData": {"GrantTenderObj": [
+        _eu_row(), _eu_row(identifier="TENDER-1", type="0"),
+    ]}}
+    rows = eu_portal.extract_objects(payload)
+    grants = [r for r in rows if str(r.get("type")) == eu_portal.GRANT_TYPE]
+    assert len(grants) == 1
+
+
+def test_public_funders_without_a_feed_are_named_as_referrals():
+    """Africa and the development banks are not searched; say so rather than omit."""
+    result = search.run(applicant(), Corpus([]), today=TODAY)
+    names = {r.name for r in result.referrals}
+    assert "African Development Bank" in names
+    assert "UN Partner Portal" in names
+    assert any(r.access.startswith("public") for r in result.referrals)

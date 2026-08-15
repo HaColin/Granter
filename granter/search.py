@@ -10,9 +10,47 @@ from .ranking import score_matches
 from .store import Corpus
 from .taxonomy import ApplicantType
 
-#: Sources Granter cannot search because they are behind a paywall. They are
-#: named rather than silently ignored, so the user knows what was not covered.
+#: Sources Granter does not search, named rather than silently ignored so the
+#: user knows what was not covered. Two kinds: paywalled indexes, and public
+#: funders that publish no machine-readable feed. The second kind is free to
+#: browse -- the only barrier is that it has to be done by hand.
 REFERRALS: list[Referral] = [
+    Referral(
+        name="African Development Bank",
+        url="https://www.afdb.org/en/projects-and-operations",
+        why=(
+            "Africa's main development funder. Publishes projects and procurement "
+            "notices on its own site with no open feed, so it has to be browsed directly."
+        ),
+        access="public, no API",
+    ),
+    Referral(
+        name="Asian Development Bank",
+        url="https://www.adb.org/projects",
+        why="Development funding across Asia and the Pacific; project listings are web-only.",
+        access="public, no API",
+    ),
+    Referral(
+        name="Inter-American Development Bank",
+        url="https://www.iadb.org/en/projects",
+        why="Development funding across Latin America and the Caribbean.",
+        access="public, no API",
+    ),
+    Referral(
+        name="UN Partner Portal",
+        url="https://www.unpartnerportal.org",
+        why=(
+            "Calls for expressions of interest from UN agencies, aimed at NGOs. "
+            "Requires registration, so it cannot be indexed from outside."
+        ),
+        access="public, registration required",
+    ),
+    Referral(
+        name="GlobalGiving",
+        url="https://www.globalgiving.org",
+        why="Crowdfunding and grant programmes for community organisations worldwide.",
+        access="public, no API",
+    ),
     Referral(
         name="Candid / Foundation Directory",
         url="https://candid.org",

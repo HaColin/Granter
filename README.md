@@ -96,8 +96,16 @@ Built on the machine-readable ones first:
   state's CKAN open-data publication on data.ca.gov, refreshed daily. State money, so
   no SAM.gov or UEI prerequisite — usually the more realistic pool for a small
   California applicant.
-* EU Funding & Tenders Portal, CORDIS, NIH Guide, UKRI Funding Finder, World Bank —
-  next, same `Opportunity` shape.
+* **EU Funding & Tenders Portal** — implemented (`granter/sources/eu_portal.py`), via
+  the portal's own bulk reference file. Covers Horizon Europe, LIFE, Erasmus+, CEF,
+  Digital Europe and the rest. The file is ~128 MB and cached on disk for a day.
+  Tenders are excluded: a procurement contract is not a grant.
+* CORDIS, NIH Guide, UKRI Funding Finder, World Bank — next, same `Opportunity` shape.
+
+The EU source publishes **no award amounts and no descriptive prose**, so those records
+carry `None` budgets with the field names in `missing_fields`, and rank on thinner text
+than a Grants.gov record. That is a limitation of the source, recorded rather than
+filled in with a guess.
 
 Fetch one source or all of them:
 
@@ -113,9 +121,16 @@ time; the concurrency is deliberately modest because this is a free public API.
 A source that is unreachable is reported and skipped; the others still land, and
 `--replace` only discards records from sources this run actually refetched.
 
-Subscription-gated sources (Candid, Devex, GrantStation, Pivot-RP, Research Professional)
-are **listed, never scraped**. They appear on the results page as "worth checking if you
-have access", so it is clear what Granter did not cover.
+Two kinds of source are **listed, never scraped**, and appear on the results page under
+"Not searched — check these yourself":
+
+* Subscription indexes: Candid, Devex, GrantStation, Pivot-RP, Research Professional.
+* Public funders with no machine-readable feed: the African Development Bank, the Asian
+  and Inter-American Development Banks, the UN Partner Portal, GlobalGiving.
+
+The second group is free to browse — the only barrier is that it has to be done by hand.
+Naming them is how a user can tell what a search did *not* cover. There is currently no
+open feed for African development funding that could be ingested honestly.
 
 ## Layout
 
@@ -131,8 +146,9 @@ granter/
   ingest.py             CLI: python -m granter.ingest
   sources/grants_gov.py federal connector
   sources/ca_grants.py   California state connector
+  sources/eu_portal.py   EU Funding & Tenders connector
   app.py, templates/    FastAPI + server-rendered HTML
-tests/                  99 tests; fixtures are synthetic and clearly marked
+tests/                  105 tests; fixtures are synthetic and clearly marked
 ```
 
 ## Verifying the connector after an upstream change

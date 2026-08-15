@@ -71,7 +71,8 @@ def test_individual_sees_the_advisory_before_any_list(client):
 def test_results_page_names_the_paywalled_sources_it_did_not_search(client):
     response = client.post("/results", data=nonprofit_answers())
     assert "Candid" in response.text
-    assert "does not search these" in response.text
+    assert "African Development Bank" in response.text
+    assert "Not searched" in response.text
 
 
 def test_every_result_carries_a_last_checked_date(client):

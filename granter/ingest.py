@@ -17,7 +17,7 @@ import sys
 import httpx
 
 from . import store
-from .sources import ca_grants, grants_gov
+from .sources import ca_grants, eu_portal, grants_gov
 
 
 RAW_DUMP = store.DATA_DIR / "probe-payload.json"
@@ -76,7 +76,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--probe", action="store_true", help="check API shape and exit")
     parser.add_argument(
         "--source",
-        choices=("all", "grants_gov", "ca_grants"),
+        choices=("all", "grants_gov", "ca_grants", "eu_portal"),
         default="all",
         help="which source(s) to fetch from (default: all)",
     )
@@ -121,6 +121,23 @@ def main(argv: list[str] | None = None) -> int:
             records += fetched
         except (httpx.HTTPError, ca_grants.SourceShapeError) as exc:
             failures.append(f"ca_grants: {exc}")
+
+    if args.source in ("all", "eu_portal"):
+        print("Fetching from the EU Funding & Tenders Portal (bulk file, cached daily)...")
+        try:
+            fetched = eu_portal.collect(
+                limit=args.limit, include_forthcoming=args.include_forecasted
+            )
+            if args.keyword:
+                needle = args.keyword.lower()
+                fetched = [
+                    r for r in fetched
+                    if needle in f"{r.title} {r.description} {r.eligibility_text}".lower()
+                ]
+            print(f"  {len(fetched)} records")
+            records += fetched
+        except (httpx.HTTPError, eu_portal.SourceShapeError, OSError) as exc:
+            failures.append(f"eu_portal: {exc}")
 
     for failure in failures:
         print(f"source failed: {failure}", file=sys.stderr)
