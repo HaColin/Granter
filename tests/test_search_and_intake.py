@@ -225,3 +225,50 @@ def test_a_forecast_is_labelled_as_an_estimate_not_a_deadline():
 def test_single_digit_applicant_codes_are_zero_padded():
     record = grants_gov.normalise(_detail(applicantTypes=[{"id": "7"}]))
     assert record.applicant_codes == ["07"]
+
+
+# --- ranking regressions ----------------------------------------------------
+
+
+def test_relevance_outranks_an_eligible_but_unrelated_call():
+    """A call naming your applicant type but about another field must not win."""
+    relevant = opportunity(
+        id="water", source_id="W", title="Desalination and water purification research",
+        description="Solar powered desalination and drinking water purification for rural communities.",
+        applicant_codes=["25"], sectors=[])
+    unrelated = opportunity(
+        id="cancer", source_id="C", title="Informatics technologies for cancer research",
+        description="Early stage development of informatics technologies and data platforms.",
+        applicant_codes=["23"], sectors=[])
+    person = applicant(
+        applicant_type=ApplicantType.FOR_PROFIT_SMALL,
+        project_description="Solar powered water purification device for rural drinking water.",
+        sectors=[])
+    result = search.run(person, Corpus([unrelated, relevant]), today=TODAY)
+    assert [m.opportunity.id for m in result.matches][0] == "water"
+
+
+def test_a_call_with_no_textual_overlap_is_flagged():
+    unrelated = opportunity(
+        id="x", title="Feral swine eradication",
+        description="Control of feral swine populations on agricultural land.",
+        applicant_codes=["23"], sectors=[])
+    person = applicant(applicant_type=ApplicantType.FOR_PROFIT_SMALL,
+                       project_description="Solar powered water purification membranes for rural wells.",
+                       sectors=[])
+    match = search.run(person, Corpus([unrelated]), today=TODAY).matches[0]
+    assert match.term_coverage < 0.12
+    assert any("little in common" in n.text for n in match.notes)
+
+
+def test_coverage_weights_distinctive_words_over_boilerplate():
+    from granter.ranking import _Bm25Index
+
+    index = _Bm25Index([
+        ["desalination", "water", "development"],
+        ["cancer", "informatics", "development"],
+        ["wildlife", "habitat", "development"],
+    ])
+    query = {"desalination", "development"}
+    # "development" is in every document, so it is worth almost nothing.
+    assert index.coverage(query, {"desalination"}) > index.coverage(query, {"development"})

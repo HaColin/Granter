@@ -191,6 +191,12 @@ class Match(BaseModel):
     verdict: Verdict
     confidence: Confidence
     score: float = 0.0
+    #: How much the call's text overlaps the project description, 0..1.
+    relevance: float = 0.0
+    #: Share of the project's distinct terms that appear in the call, 0..1.
+    #: Low coverage with a high BM25 score means one rare word matched, which
+    #: is not the same as the call being about your project.
+    term_coverage: float = 0.0
     notes: list[Note] = Field(default_factory=list)
 
     def notes_of(self, kind: str) -> list[Note]:

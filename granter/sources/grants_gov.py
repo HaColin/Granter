@@ -159,13 +159,25 @@ def _parse_date(value: Any, warnings: list[str] | None = None, field: str = "") 
     return None
 
 
+def _clean(value: Any) -> str:
+    """Collapse embedded newlines and runs of whitespace into single spaces."""
+    return re.sub(r"\s+", " ", str(value)).strip()
+
+
 def _parse_money(value: Any) -> int | None:
+    """Read a published amount.
+
+    A zero is how this API says "not specified" for award ranges and funding
+    totals -- there is no such thing as a $0 award ceiling -- so it is reported
+    as absent rather than as a real limit of nothing.
+    """
     if value in (None, "", "null"):
         return None
     try:
-        return int(float(str(value).replace(",", "").replace("$", "")))
+        amount = int(float(str(value).replace(",", "").replace("$", "")))
     except ValueError:
         return None
+    return amount or None
 
 
 def _applicant_codes(synopsis: dict[str, Any]) -> list[str]:
@@ -293,10 +305,13 @@ def normalise(detail: dict[str, Any]) -> Opportunity:
     if not title:
         raise SourceShapeError(f"opportunity {opportunity_id} has no title")
 
-    funder = (
-        synopsis.get("agencyName")
-        or detail.get("agencyName")
+    # The top-level agency name is the reliable one. The synopsis field of the
+    # same name sometimes carries a contact person instead ("Lois E East\n
+    # Grantor"), which is not who is funding the work.
+    funder = _clean(
+        detail.get("agencyName")
         or detail.get("agencyCode")
+        or synopsis.get("agencyName")
         or "Unknown agency"
     )
 
@@ -317,8 +332,8 @@ def normalise(detail: dict[str, Any]) -> Opportunity:
         id=f"{SOURCE}:{opportunity_id}",
         source=SOURCE,
         source_id=number,
-        title=str(title).strip(),
-        funder=str(funder).strip(),
+        title=_clean(title),
+        funder=funder,
         source_url=DETAIL_URL.format(id=opportunity_id),
         description=str(either(_DESC_FIELDS) or "").strip(),
         eligibility_text=str(synopsis.get("applicantEligibilityDesc") or "").strip(),

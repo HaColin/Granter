@@ -192,3 +192,30 @@ def test_parse_warnings_reach_the_record():
     })
     assert record.close_date is None
     assert record.parse_warnings and "close_date" in record.parse_warnings[0]
+
+
+def test_a_zero_amount_is_read_as_unspecified():
+    record = grants_gov.normalise({
+        "id": 7, "opportunityTitle": "T",
+        "synopsis": {**synopsis(), "awardCeiling": "0", "awardFloor": "0"},
+    })
+    assert record.award_ceiling is None and record.award_floor is None
+    assert {"award_ceiling", "award_floor"} <= set(record.missing_fields)
+
+
+def test_the_funder_is_the_agency_not_a_contact_person():
+    """The synopsis agencyName sometimes holds a contact, with a newline in it."""
+    record = grants_gov.normalise({
+        "id": 8, "opportunityTitle": "T", "agencyName": "Bureau of Reclamation",
+        "synopsis": {**synopsis(), "agencyName": "Lois E East\nGrantor"},
+    })
+    assert record.funder == "Bureau of Reclamation"
+
+
+def test_whitespace_in_text_fields_is_collapsed():
+    record = grants_gov.normalise({
+        "id": 9, "opportunityTitle": "Rural  Water\n  Program",
+        "synopsis": {**synopsis(), "agencyName": "Some  Agency\nGrantor"},
+    })
+    assert record.title == "Rural Water Program"
+    assert "\n" not in record.funder

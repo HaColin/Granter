@@ -272,9 +272,11 @@ def _check_amount(applicant: Applicant, opp: Opportunity) -> list[Note]:
     if want is None:
         return []
 
-    if opp.award_ceiling is not None and want > opp.award_ceiling:
-        over = want / opp.award_ceiling
-        kind = "blocker" if over > AMOUNT_NEAR_MISS_FACTOR else "caution"
+    # A ceiling of zero means "unspecified", never a real cap of nothing.
+    if opp.award_ceiling and want > opp.award_ceiling:
+        kind = (
+            "blocker" if want > opp.award_ceiling * AMOUNT_NEAR_MISS_FACTOR else "caution"
+        )
         return [
             Note(
                 kind=kind,
@@ -286,7 +288,7 @@ def _check_amount(applicant: Applicant, opp: Opportunity) -> list[Note]:
             )
         ]
 
-    if opp.award_floor is not None and want < opp.award_floor:
+    if opp.award_floor and want < opp.award_floor:
         # Asking far below the floor is not a project that needs rescoping, it
         # is a different programme -- treat it the same way as a far over-ask.
         far_below = want * AMOUNT_NEAR_MISS_FACTOR < opp.award_floor
@@ -305,7 +307,7 @@ def _check_amount(applicant: Applicant, opp: Opportunity) -> list[Note]:
             )
         ]
 
-    if opp.award_ceiling is None and opp.award_floor is None:
+    if not opp.award_ceiling and not opp.award_floor:
         return [
             Note(
                 kind="unknown",

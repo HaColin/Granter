@@ -218,3 +218,11 @@ def test_stale_record_is_flagged_for_reverification():
     match = evaluate(applicant(), opportunity(fetched_at=utcnow() - td(days=30)), today=TODAY)
     assert any(n.field == "fetched_at" and n.kind == "caution" for n in match.notes)
     assert match.confidence is not Confidence.HIGH
+
+
+def test_a_zero_award_ceiling_does_not_crash_the_amount_check():
+    """Grants.gov publishes 0 for 'unspecified'; it is not a cap of nothing."""
+    match = evaluate(applicant(amount_sought=50_000),
+                     opportunity(award_ceiling=0, award_floor=0), today=TODAY)
+    assert any(n.field == "award_ceiling" and n.kind == "unknown" for n in match.notes)
+    assert match.verdict is not Verdict.NEAR_MISS
