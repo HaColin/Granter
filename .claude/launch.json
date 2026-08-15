@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "granter",
+      "runtimeExecutable": "python",
+      "runtimeArgs": ["-m", "uvicorn", "granter.app:app", "--reload", "--port", "8099"],
+      "port": 8099
+    }
+  ]
+}

@@ -1,0 +1,127 @@
+# Granter
+
+Finding grants is fragmented and opaque. Granter takes a structured intake survey and
+returns a ranked list of calls you are plausibly eligible for — each with the official
+source link, the deadline, why you match, what would disqualify you, and the forms the
+application requires.
+
+This is the first build: **the intake survey and the eligibility engine**, with a live
+Grants.gov connector behind them. Matching is deterministic — structured filters plus
+BM25 over the retrieved call text. No model is in the loop, so nothing in a result can
+be hallucinated.
+
+## The rule everything else follows
+
+**Granter never invents a grant, deadline, amount, or URL.** The repository ships with an
+empty corpus. Every record comes from an ingest run against a live source and carries the
+URL it came from and the timestamp it was retrieved. Where a funder did not publish a
+field, the record stores `None`, the field name goes into `missing_fields`, and the UI
+says "not published" rather than showing a number nobody stated.
+
+The synthetic opportunities in `tests/fixtures.py` are invented, are labelled as such,
+and are never loaded by the application.
+
+## Running it
+
+```bash
+pip install -r requirements.txt
+```
+
+Fetch live opportunities (needs outbound access to `api.grants.gov`):
+
+```bash
+python -m granter.ingest --limit 200
+```
+
+Start the app:
+
+```bash
+python -m uvicorn granter.app:app --reload
+```
+
+Then open http://localhost:8000. With an empty corpus the app says so and refuses to
+show results rather than filling the page with something it did not retrieve.
+
+Run the tests:
+
+```bash
+python -m pytest -q
+```
+
+## How a verdict is reached
+
+`granter/eligibility.py` runs each call through the same checks and returns the note that
+explains every one of them. Notes come in four kinds:
+
+| Kind | Meaning |
+| --- | --- |
+| `match` | A stated applicant answer satisfies a stated field on the call. |
+| `caution` | Eligible, but something needs verifying or preparing first. |
+| `blocker` | The call, as retrieved, excludes this applicant. |
+| `unknown` | The source did not publish the field. Never treated as a pass. |
+
+Those roll up into a verdict:
+
+* **Eligible** — the call names your applicant type and nothing is unknown.
+* **Likely eligible** — matched, but through an ambiguous code (`Others`, `Unrestricted`)
+  or with fields the source left blank. Verify before investing time.
+* **Near miss** — your applicant type fits, but something else does not (budget above the
+  ceiling, SAM.gov registration that cannot complete before the deadline). Shown in a
+  separate list, labelled, never mixed in with real matches.
+* **Not eligible** — the call excludes your type, or the deadline has passed. Not shown.
+
+Confidence is separate from verdict: it drops to `low` whenever the source document left
+a field blank, and to `medium` when the record is more than a week old.
+
+## Individuals
+
+Most government grants go to organisations, and US federal grants are almost never
+available to individuals for personal needs. Granter says this before it shows anything,
+rather than returning a list of calls the person cannot receive:
+
+* An **individual or informal group** gets a blocking advisory explaining the constraint,
+  followed by the routes that do work — fiscal sponsorship, scholarships and fellowships,
+  or applying jointly with a partner organisation. Only calls that explicitly name
+  individuals (Grants.gov code `21`) can then match.
+* With a **fiscal sponsor**, the sponsor is the legal applicant, so eligibility is
+  evaluated against the sponsoring 501(c)(3) — and the UI says that is what happened.
+
+## Sources
+
+Built on the machine-readable ones first:
+
+* **Grants.gov** — implemented (`granter/sources/grants_gov.py`), via the public
+  Search2 / FetchOpportunity API.
+* EU Funding & Tenders Portal, CORDIS, NIH Guide, UKRI Funding Finder, World Bank —
+  next, same `Opportunity` shape.
+
+Subscription-gated sources (Candid, Devex, GrantStation, Pivot-RP, Research Professional)
+are **listed, never scraped**. They appear on the results page as "worth checking if you
+have access", so it is clear what Granter did not cover.
+
+## Layout
+
+```
+granter/
+  taxonomy.py           applicant types, Grants.gov eligibility codes, sectors
+  models.py             Opportunity, Applicant, Match — provenance on every record
+  intake.py             the 11-field survey, with branching predicates
+  eligibility.py        the deterministic rules engine
+  ranking.py            BM25 + structural bonuses
+  search.py             orchestration, near-miss split, paywalled-source referrals
+  store.py              the JSON corpus (ships empty)
+  ingest.py             CLI: python -m granter.ingest
+  sources/grants_gov.py the connector
+  app.py, templates/    FastAPI + server-rendered HTML
+tests/                  48 tests; fixtures are synthetic and clearly marked
+```
+
+## Verifying the connector after an upstream change
+
+```bash
+python -m granter.ingest --probe
+```
+
+Prints the raw payload keys the normaliser depends on, and the first normalised record.
+If Grants.gov changes a field name, `normalise()` raises rather than emitting a record
+with plausible-looking gaps.

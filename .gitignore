@@ -1,0 +1,10 @@
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.env
+
+# The corpus is fetched, never committed: a checked-in grant record goes stale
+# and starts lying about deadlines.
+data/*.json

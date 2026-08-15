@@ -1,0 +1,91 @@
+{% extends "base.html" %}
+{% block title %}Granter — intake{% endblock %}
+{% block body %}
+
+<h1>Granter</h1>
+<p class="lede">Answer these and get a ranked list of grants you are plausibly eligible for,
+with the official links, deadlines, and the forms each one requires.</p>
+
+{% if corpus.is_empty %}
+<div class="banner bad">
+  <strong>No opportunity data loaded.</strong>
+  Granter will not show results it has not retrieved. Populate the corpus first:
+  <code>python -m granter.ingest</code>
+</div>
+{% else %}
+<div class="banner good">
+  {{ corpus.records|length }} opportunities loaded
+  {%- if corpus.fetched_at %}, last checked {{ corpus.fetched_at.date() }}{% endif %}.
+</div>
+{% endif %}
+
+{% if error %}<div class="banner bad">Could not read your answers: {{ error }}</div>{% endif %}
+
+<form method="post" action="/results">
+  {% for q in questions %}
+  <div class="panel" data-question="{{ q.name }}">
+    <label for="{{ q.name }}">{{ q.prompt }}{% if q.required %} *{% endif %}</label>
+    <p class="why">{{ q.why }}</p>
+
+    {% if q.kind == "select" %}
+      <select id="{{ q.name }}" name="{{ q.name }}" {% if q.required %}required{% endif %}>
+        {% if not q.required %}<option value="">—</option>{% endif %}
+        {% for value, label in q.options %}<option value="{{ value }}">{{ label }}</option>{% endfor %}
+      </select>
+
+    {% elif q.kind == "multiselect" %}
+      <fieldset>
+        {% for value, label in q.options %}
+        <label><input type="checkbox" name="{{ q.name }}" value="{{ value }}"> {{ label }}</label>
+        {% endfor %}
+      </fieldset>
+
+    {% elif q.kind == "bool" %}
+      <fieldset>
+        <label><input type="radio" name="{{ q.name }}" value="yes"> Yes</label>
+        <label><input type="radio" name="{{ q.name }}" value="no" checked> No</label>
+      </fieldset>
+
+    {% elif q.kind == "textarea" %}
+      <textarea id="{{ q.name }}" name="{{ q.name }}" placeholder="{{ q.placeholder }}"
+                {% if q.required %}required{% endif %}></textarea>
+
+    {% elif q.kind == "number" %}
+      <input type="number" min="0" id="{{ q.name }}" name="{{ q.name }}" placeholder="{{ q.placeholder }}">
+
+    {% elif q.kind == "date" %}
+      <input type="date" id="{{ q.name }}" name="{{ q.name }}">
+
+    {% else %}
+      <input type="text" id="{{ q.name }}" name="{{ q.name }}" placeholder="{{ q.placeholder }}"
+             {% if q.required %}required{% endif %}>
+    {% endif %}
+  </div>
+  {% endfor %}
+
+  <button type="submit">Find grants</button>
+</form>
+
+<script>
+  // Branching mirrors granter/intake.py: hidden answers are discarded server-side,
+  // so this only decides what the person is asked.
+  const NO_ENTITY = ["individual", "informal_group"];
+  const form = document.currentScript.previousElementSibling;
+  const box = name => form.querySelector(`[data-question="${name}"]`);
+
+  function refresh() {
+    const type = form.querySelector('[name="applicant_type"]').value;
+    const country = (form.querySelector('[name="country"]').value || "").toUpperCase();
+    const noEntity = NO_ENTITY.includes(type);
+
+    box("has_fiscal_sponsor").hidden = !noEntity;
+    box("legal_registration").hidden = noEntity;
+    box("sam_uei_status").hidden = country !== "US";
+    box("grants_gov_account").hidden = country !== "US";
+  }
+
+  form.querySelector('[name="applicant_type"]').addEventListener("change", refresh);
+  form.querySelector('[name="country"]').addEventListener("input", refresh);
+  refresh();
+</script>
+{% endblock %}

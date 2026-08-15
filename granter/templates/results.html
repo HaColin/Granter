@@ -1,0 +1,104 @@
+{% extends "base.html" %}
+{% block title %}Granter — results{% endblock %}
+
+{% macro card(match) %}
+{% set opp = match.opportunity %}
+<div class="panel">
+  <span class="tag {{ match.verdict.value }}">{{ verdict_labels[match.verdict] }}</span>
+  <span class="tag">{{ confidence_labels[match.confidence] }}</span>
+
+  <h3 style="margin:.6rem 0 .2rem;">
+    <a href="{{ opp.source_url }}" target="_blank" rel="noopener">{{ opp.title }}</a>
+  </h3>
+  <p class="meta">
+    {{ opp.funder }} &middot; {{ opp.source_id }}<br>
+    {% if opp.rolling %}Rolling deadline
+    {% elif opp.close_date %}Closes {{ opp.close_date }}
+      ({{ opp.days_remaining() }} days remaining)
+    {% else %}<span class="none">No closing date published</span>{% endif %}
+    &middot;
+    {% if opp.award_ceiling or opp.award_floor %}
+      Award {{ "${:,}".format(opp.award_floor) if opp.award_floor else "—" }}
+      to {{ "${:,}".format(opp.award_ceiling) if opp.award_ceiling else "—" }}
+    {% else %}<span class="none">Award range not published</span>{% endif %}
+    {% if opp.total_pool %} &middot; pool {{ "${:,}".format(opp.total_pool) }}{% endif %}
+    <br>Record last checked {{ opp.fetched_at.date() }}
+  </p>
+
+  <ul class="notes">
+    {% for note in match.notes %}<li class="{{ note.kind }}">{{ note.text }}</li>{% endfor %}
+  </ul>
+
+  {% if opp.eligibility_text %}
+  <details>
+    <summary>Eligibility text from the call</summary>
+    <p class="meta">{{ opp.eligibility_text }}</p>
+  </details>
+  {% endif %}
+
+  <h4 style="margin:1rem 0 .3rem;">How to apply</h4>
+  {% if opp.steps %}
+  <ol class="steps">
+    {% for step in opp.steps|sort(attribute="order") %}
+    <li>{% if step.url %}<a href="{{ step.url }}" target="_blank" rel="noopener">{{ step.description }}</a>
+        {% else %}{{ step.description }}{% endif %}
+        {% if step.lead_time_days %}<em>(start ~{{ step.lead_time_days }} days ahead)</em>{% endif %}</li>
+    {% endfor %}
+  </ol>
+  {% else %}<p class="none">No application steps published for this call.</p>{% endif %}
+
+  <h4 style="margin:1rem 0 .3rem;">Forms</h4>
+  {% if opp.forms %}
+  <ul>
+    {% for f in opp.forms %}
+    <li>{% if f.url %}<a href="{{ f.url }}" target="_blank" rel="noopener">{{ f.name }}</a>
+        {% else %}{{ f.name }} <span class="none">(no direct link published — open the call page)</span>{% endif %}</li>
+    {% endfor %}
+  </ul>
+  {% else %}<p class="none">No Forms Found</p>{% endif %}
+
+  <p class="meta">Verify every detail above against
+     <a href="{{ opp.source_url }}" target="_blank" rel="noopener">the official call page</a> before applying.</p>
+</div>
+{% endmacro %}
+
+{% block body %}
+<h1>Results</h1>
+<p class="lede">
+  {{ applicant_labels[applicant.applicant_type] }} &middot; {{ applicant.country }}
+  {%- if applicant.region %} / {{ applicant.region }}{% endif %} &middot;
+  searched {{ result.corpus_size }} retrieved opportunities
+  {%- if result.corpus_fetched_at %}, corpus last updated {{ result.corpus_fetched_at.date() }}{% endif %}.
+  <a href="/">Start over</a>
+</p>
+
+{% for note in result.advisories %}
+<div class="banner {{ 'bad' if note.kind == 'blocker' else '' }}">{{ note.text }}</div>
+{% endfor %}
+
+<h2>Matches ({{ result.matches|length }})</h2>
+{% if result.matches %}
+  {% for match in result.matches %}{{ card(match) }}{% endfor %}
+{% else %}
+<p class="none">Nothing in the retrieved corpus matches your eligibility. That is a real
+   answer, not an error — no match is better than a fabricated one. Widen the ingest
+   (<code>python -m granter.ingest --keyword ...</code>) or check the sources below.</p>
+{% endif %}
+
+<h2>Near misses ({{ result.near_misses|length }})</h2>
+<p class="meta">Your applicant type fits these, but something else does not. Shown so you
+   can judge for yourself — do not treat them as eligible.</p>
+{% if result.near_misses %}
+  {% for match in result.near_misses %}{{ card(match) }}{% endfor %}
+{% else %}<p class="none">None.</p>{% endif %}
+
+<h2>Worth checking if you have access</h2>
+<p class="meta">Granter does not search these — they are behind paywalls. It will not
+   pretend to have covered them.</p>
+<ul>
+  {% for ref in result.referrals %}
+  <li><a href="{{ ref.url }}" target="_blank" rel="noopener">{{ ref.name }}</a>
+      ({{ ref.access }}) — {{ ref.why }}</li>
+  {% endfor %}
+</ul>
+{% endblock %}

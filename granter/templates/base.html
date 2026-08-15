@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{% block title %}Granter{% endblock %}</title>
+<style>
+  :root {
+    --bg: #fbfaf8; --panel: #ffffff; --ink: #1c1a17; --muted: #5f5a52;
+    --line: #e2ddd4; --accent: #2f5d50; --warn: #8a5a12; --bad: #97321f;
+    --good: #2f5d50;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#16150f; --panel:#1e1d17; --ink:#f0ece4; --muted:#a9a294;
+            --line:#33312a; --accent:#7fbfa9; --warn:#d8a54a; --bad:#e0836c; --good:#7fbfa9; }
+  }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--ink);
+         font:16px/1.55 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; }
+  main { max-width: 860px; margin: 0 auto; padding: 2rem 1.25rem 5rem; }
+  h1 { font-size: 1.9rem; margin: 0 0 .25rem; letter-spacing: -0.01em; }
+  h2 { font-size: 1.2rem; margin: 2.25rem 0 .75rem; }
+  a { color: var(--accent); }
+  .lede { color: var(--muted); margin: 0 0 2rem; }
+  .panel { background: var(--panel); border: 1px solid var(--line);
+           border-radius: 10px; padding: 1.1rem 1.2rem; margin-bottom: 1rem; }
+  label { display:block; font-weight:600; margin-bottom:.2rem; }
+  .why { color: var(--muted); font-size: .85rem; margin: 0 0 .5rem; }
+  input[type=text], input[type=number], input[type=date], select, textarea {
+    width:100%; padding:.55rem .65rem; border:1px solid var(--line); border-radius:6px;
+    background:var(--bg); color:var(--ink); font: inherit; }
+  textarea { min-height: 7rem; resize: vertical; }
+  fieldset { border:1px solid var(--line); border-radius:6px; padding:.6rem .8rem; }
+  fieldset label { font-weight: 400; display:inline-flex; align-items:center;
+                   gap:.35rem; margin:.2rem .9rem .2rem 0; }
+  button { background: var(--accent); color: var(--bg); border:0; border-radius:6px;
+           padding:.7rem 1.4rem; font: inherit; font-weight:600; cursor:pointer; }
+  .banner { border-left:4px solid var(--warn); padding:.75rem 1rem; margin-bottom:1rem;
+            background:var(--panel); border-radius:0 6px 6px 0; }
+  .banner.bad { border-left-color: var(--bad); }
+  .banner.good { border-left-color: var(--good); }
+  .tag { display:inline-block; font-size:.75rem; font-weight:700; letter-spacing:.03em;
+         text-transform:uppercase; padding:.15rem .5rem; border-radius:4px;
+         border:1px solid var(--line); color:var(--muted); }
+  .tag.eligible { color:var(--good); border-color:var(--good); }
+  .tag.near_miss { color:var(--warn); border-color:var(--warn); }
+  .meta { color:var(--muted); font-size:.9rem; margin:.35rem 0 .75rem; }
+  ul.notes { list-style:none; padding:0; margin:.5rem 0; }
+  ul.notes li { padding:.25rem 0 .25rem .95rem; position:relative; }
+  ul.notes li::before { position:absolute; left:0; }
+  li.match::before { content:"+"; color:var(--good); }
+  li.caution::before { content:"!"; color:var(--warn); }
+  li.blocker::before { content:"x"; color:var(--bad); }
+  li.unknown::before { content:"?"; color:var(--muted); }
+  ol.steps { padding-left:1.2rem; }
+  ol.steps li { margin:.3rem 0; }
+  .none { color: var(--muted); font-style: italic; }
+  footer { color:var(--muted); font-size:.85rem; border-top:1px solid var(--line);
+           margin-top:3rem; padding-top:1rem; }
+</style>
+</head>
+<body>
+<main>
+{% block body %}{% endblock %}
+<footer>
+  <p>{{ free_access_note }}</p>
+  <p>Granter shows only what it has retrieved from a source document. Always confirm
+     deadlines and eligibility on the funder's own page before you apply.</p>
+</footer>
+</main>
+</body>
+</html>
