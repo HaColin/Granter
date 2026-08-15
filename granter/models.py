@@ -74,6 +74,9 @@ class Opportunity(BaseModel):
 
     #: ISO 3166-1 alpha-2 of the funder's jurisdiction, e.g. "US".
     jurisdiction: str | None = None
+    #: State or region the funder is limited to, e.g. "CA". Set by sources that
+    #: are definitionally sub-national; left None by national ones.
+    region: str | None = None
     #: Countries the funded work may take place in, when the call states it.
     eligible_work_countries: list[str] = Field(default_factory=list)
 

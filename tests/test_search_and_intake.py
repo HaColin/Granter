@@ -272,3 +272,86 @@ def test_coverage_weights_distinctive_words_over_boilerplate():
     query = {"desalination", "development"}
     # "development" is in every document, so it is worth almost nothing.
     assert index.coverage(query, {"desalination"}) > index.coverage(query, {"development"})
+
+
+# --- California connector ---------------------------------------------------
+
+
+def _ca_row(**overrides):
+    row = {
+        "PortalID": "190536", "Title": "Water Efficiency Grant",
+        "AgencyDept": "State Water Resources Control Board", "Status": "active",
+        "ApplicantType": "Business; Nonprofit", "Categories": "Environment & Water",
+        "EstAmounts": "Between $50,000 and $500,000", "MatchingFunds": "Not Required",
+        "ApplicationDeadline": "2027-02-01 12:00:00", "OpenDate": "2026-08-13 21:25:00",
+        "GrantURL": "https://example.ca.gov/grant", "Purpose": "Improve water efficiency.",
+    }
+    row.update(overrides)
+    return row
+
+
+def test_ca_row_normalises_into_the_shared_shape():
+    from granter.sources import ca_grants
+
+    record = ca_grants.normalise(_ca_row())
+    assert record.source == "ca_grants"
+    assert record.region == "CA"
+    assert record.funder == "State Water Resources Control Board"
+    assert record.close_date.isoformat() == "2027-02-01"
+    assert (record.award_floor, record.award_ceiling) == (50_000, 500_000)
+    assert record.cost_share_required is False
+    # State money: none of the federal registration machinery applies.
+    assert record.prerequisites == []
+
+
+def test_ca_applicant_types_map_onto_the_shared_codes():
+    from granter.sources import ca_grants
+
+    assert set(ca_grants.normalise(_ca_row()).applicant_codes) == {"12", "13", "20", "22", "23"}
+    individual = ca_grants.normalise(_ca_row(ApplicantType="Individual"))
+    assert individual.applicant_codes == ["21"]
+    ambiguous = ca_grants.normalise(_ca_row(ApplicantType="Other Legal Entity"))
+    assert ambiguous.applicant_codes == ["25"]
+
+
+def test_ongoing_is_a_rolling_deadline_not_a_parse_failure():
+    from granter.sources import ca_grants
+
+    record = ca_grants.normalise(_ca_row(ApplicationDeadline="Ongoing"))
+    assert record.rolling is True
+    assert record.close_date is None
+    assert record.parse_warnings == []
+
+
+def test_free_text_award_prose_is_not_guessed_at():
+    from granter.sources import ca_grants
+
+    record = ca_grants.normalise(
+        _ca_row(EstAmounts="Dependant on number of submissions received, etc.")
+    )
+    assert record.award_floor is None and record.award_ceiling is None
+    assert {"award_floor", "award_ceiling"} <= set(record.missing_fields)
+
+
+def test_a_single_published_amount_sets_only_the_ceiling():
+    from granter.sources import ca_grants
+
+    record = ca_grants.normalise(_ca_row(EstAmounts="$500,000"))
+    assert record.award_ceiling == 500_000
+    assert record.award_floor is None
+
+
+def test_a_state_programme_is_a_near_miss_for_an_out_of_state_applicant():
+    out_of_state = applicant(region="TX")
+    result = search.run(out_of_state, Corpus([opportunity(region="CA")]), today=TODAY)
+    assert not result.matches
+    assert result.near_misses
+    assert any(n.field == "region" and n.kind == "blocker"
+               for n in result.near_misses[0].notes)
+
+
+def test_a_state_programme_matches_an_in_state_applicant():
+    local = applicant(region="CA")
+    result = search.run(local, Corpus([opportunity(region="CA")]), today=TODAY)
+    assert result.matches
+    assert any(n.field == "region" and n.kind == "match" for n in result.matches[0].notes)

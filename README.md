@@ -91,9 +91,23 @@ rather than returning a list of calls the person cannot receive:
 Built on the machine-readable ones first:
 
 * **Grants.gov** — implemented (`granter/sources/grants_gov.py`), via the public
-  Search2 / FetchOpportunity API.
+  Search2 / FetchOpportunity API. Federal money only.
+* **California Grants Portal** — implemented (`granter/sources/ca_grants.py`), via the
+  state's CKAN open-data publication on data.ca.gov, refreshed daily. State money, so
+  no SAM.gov or UEI prerequisite — usually the more realistic pool for a small
+  California applicant.
 * EU Funding & Tenders Portal, CORDIS, NIH Guide, UKRI Funding Finder, World Bank —
   next, same `Opportunity` shape.
+
+Fetch one source or all of them:
+
+```bash
+python -m granter.ingest --source all --limit 400 --replace
+python -m granter.ingest --source ca_grants --limit 300
+```
+
+A source that is unreachable is reported and skipped; the others still land, and
+`--replace` only discards records from sources this run actually refetched.
 
 Subscription-gated sources (Candid, Devex, GrantStation, Pivot-RP, Research Professional)
 are **listed, never scraped**. They appear on the results page as "worth checking if you
@@ -111,9 +125,10 @@ granter/
   search.py             orchestration, near-miss split, paywalled-source referrals
   store.py              the JSON corpus (ships empty)
   ingest.py             CLI: python -m granter.ingest
-  sources/grants_gov.py the connector
+  sources/grants_gov.py federal connector
+  sources/ca_grants.py   California state connector
   app.py, templates/    FastAPI + server-rendered HTML
-tests/                  48 tests; fixtures are synthetic and clearly marked
+tests/                  98 tests; fixtures are synthetic and clearly marked
 ```
 
 ## Verifying the connector after an upstream change

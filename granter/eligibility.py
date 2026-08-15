@@ -252,6 +252,32 @@ def _check_geography(applicant: Applicant, opp: Opportunity) -> list[Note]:
             )
         ]
 
+    # A state programme is scoped to that state by definition. Reported as a
+    # blocker so the call lands in near misses -- visible and labelled -- rather
+    # than being hidden, because the applicant may operate across state lines in
+    # ways this survey does not capture.
+    if opp.region and applicant.region and opp.region.upper() != applicant.region.upper():
+        return [
+            Note(
+                kind="blocker",
+                field="region",
+                text=(
+                    f"This is a {opp.region.upper()} state programme and you are based in "
+                    f"{applicant.region.upper()}. State funding is normally limited to "
+                    "applicants and work within that state."
+                ),
+            )
+        ]
+
+    if opp.region and applicant.region and opp.region.upper() == applicant.region.upper():
+        return [
+            Note(
+                kind="match",
+                field="region",
+                text=f"This is a {opp.region.upper()} state programme and you are based in {opp.region.upper()}.",
+            )
+        ]
+
     if opp.jurisdiction and opp.jurisdiction.upper() not in countries:
         return [
             Note(

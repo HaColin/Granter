@@ -17,7 +17,7 @@ import sys
 import httpx
 
 from . import store
-from .sources import grants_gov
+from .sources import ca_grants, grants_gov
 
 
 RAW_DUMP = store.DATA_DIR / "probe-payload.json"
@@ -75,6 +75,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--replace", action="store_true", help="discard the existing corpus")
     parser.add_argument("--probe", action="store_true", help="check API shape and exit")
     parser.add_argument(
+        "--source",
+        choices=("all", "grants_gov", "ca_grants"),
+        default="all",
+        help="which source(s) to fetch from (default: all)",
+    )
+    parser.add_argument(
         "--include-forecasted",
         action="store_true",
         help="also fetch forecasts -- announced intentions to fund, not yet open to apply",
@@ -86,23 +92,65 @@ def main(argv: list[str] | None = None) -> int:
     if args.probe:
         return probe(statuses)
 
-    print(f"Fetching up to {args.limit} opportunities from Grants.gov (statuses={statuses})...")
-    try:
-        records = grants_gov.collect(keyword=args.keyword, limit=args.limit, statuses=statuses)
-    except (httpx.HTTPError, grants_gov.SourceShapeError) as exc:
-        print(f"ingest failed, corpus unchanged: {exc}", file=sys.stderr)
-        return 1
+    records: list = []
+    failures: list[str] = []
+
+    if args.source in ("all", "grants_gov"):
+        print(f"Fetching up to {args.limit} from Grants.gov (federal, statuses={statuses})...")
+        try:
+            fetched = grants_gov.collect(keyword=args.keyword, limit=args.limit, statuses=statuses)
+            print(f"  {len(fetched)} records")
+            records += fetched
+        except (httpx.HTTPError, grants_gov.SourceShapeError) as exc:
+            failures.append(f"grants_gov: {exc}")
+
+    if args.source in ("all", "ca_grants"):
+        print(f"Fetching up to {args.limit} from the California Grants Portal (state)...")
+        try:
+            fetched = ca_grants.collect(limit=args.limit)
+            if args.include_forecasted:
+                fetched += ca_grants.collect(limit=args.limit, status="forecasted")
+            if args.keyword:
+                # The portal has no keyword filter, so it is applied here.
+                needle = args.keyword.lower()
+                fetched = [
+                    r for r in fetched
+                    if needle in f"{r.title} {r.description} {r.eligibility_text}".lower()
+                ]
+            print(f"  {len(fetched)} records")
+            records += fetched
+        except (httpx.HTTPError, ca_grants.SourceShapeError) as exc:
+            failures.append(f"ca_grants: {exc}")
+
+    for failure in failures:
+        print(f"source failed: {failure}", file=sys.stderr)
 
     if not records:
         print("no usable records returned; corpus unchanged", file=sys.stderr)
         return 1
 
-    existing = [] if args.replace else store.load().records
+    # --replace discards what this run refetched, not what it failed to reach.
+    # A source that is down must not silently delete its records: the corpus
+    # would shrink without anyone asking for that, and the UI would report
+    # "no matches" for a source that simply had a bad minute.
+    refreshed = {r.source for r in records}
+    if args.replace:
+        existing = [r for r in store.load().records if r.source not in refreshed]
+        if existing:
+            kept = ", ".join(sorted({r.source for r in existing}))
+            print(f"  --replace kept {len(existing)} record(s) from sources not fetched: {kept}")
+    else:
+        existing = store.load().records
+
     merged = store.merge(existing, records)
     path = store.save(merged)
 
+    from collections import Counter
+
     incomplete = sum(1 for r in merged if r.missing_fields)
-    print(f"wrote {len(merged)} records to {path}")
+    print(f"\nwrote {len(merged)} records to {path}")
+    for source, count in sorted(Counter(r.source for r in merged).items()):
+        print(f"  {source}: {count}")
     print(f"  {len(records)} fetched this run, {incomplete} with fields the source did not publish")
 
     with_dates = sum(1 for r in records if r.close_date or r.rolling)
