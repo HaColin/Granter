@@ -177,12 +177,69 @@ def test_a_non_json_response_is_rejected(api_key):
         chat.turn([], {}, client=client_returning(handler))
 
 
-def test_an_unexpected_response_shape_is_rejected(api_key):
+def test_a_blocked_prompt_says_so_rather_than_failing_obscurely(api_key):
     def handler(request):
         return httpx.Response(200, json={"promptFeedback": {"blockReason": "SAFETY"}})
 
-    with pytest.raises(chat.ChatUnavailable, match="unexpected response shape"):
+    with pytest.raises(chat.ChatUnavailable, match="blocked the request"):
         chat.turn([], {}, client=client_returning(handler))
+
+
+def test_a_response_with_no_candidates_is_rejected(api_key):
+    def handler(request):
+        return httpx.Response(200, json={"usageMetadata": {}})
+
+    with pytest.raises(chat.ChatUnavailable, match="no candidates"):
+        chat.turn([], {}, client=client_returning(handler))
+
+
+def test_a_truncated_response_names_the_output_limit(api_key):
+    def handler(request):
+        return httpx.Response(200, json={
+            "candidates": [{"content": {"parts": []}, "finishReason": "MAX_TOKENS"}]
+        })
+
+    with pytest.raises(chat.ChatUnavailable, match="output limit"):
+        chat.turn([], {}, client=client_returning(handler))
+
+
+def test_json_wrapped_in_a_markdown_fence_is_still_read(api_key):
+    """Models emit fenced JSON even under a response schema."""
+    def handler(request):
+        fenced = '```json\n{"reply":"ok","ready":false,"answers":{"country":"US"}}\n```'
+        return httpx.Response(200, json={
+            "candidates": [{"content": {"parts": [{"text": fenced}]}}]
+        })
+
+    reply, answers, _ = chat.turn([], {}, client=client_returning(handler))
+    assert reply == "ok" and answers == {"country": "US"}
+
+
+def test_text_split_across_several_parts_is_joined(api_key):
+    def handler(request):
+        return httpx.Response(200, json={"candidates": [{"content": {"parts": [
+            {"text": '{"reply":"ok","ready":false,'},
+            {"text": '"answers":{"country":"US"}}'},
+        ]}}]})
+
+    reply, answers, _ = chat.turn([], {}, client=client_returning(handler))
+    assert reply == "ok" and answers == {"country": "US"}
+
+
+def test_a_retired_model_falls_back_to_an_alternate(api_key):
+    """A renamed model is the likeliest silent breakage; the UI should survive it."""
+    seen: list[str] = []
+
+    def handler(request):
+        model = str(request.url).split("/models/")[1].split(":")[0]
+        seen.append(model)
+        if model == chat.DEFAULT_MODEL:
+            return httpx.Response(200, json={"error": {"message": "model not found"}})
+        return gemini_reply("ok", {"country": "US"})
+
+    reply, answers, _ = chat.turn([], {}, client=client_returning(handler))
+    assert reply == "ok"
+    assert seen[0] == chat.DEFAULT_MODEL and len(seen) > 1
 
 
 # --- routes -----------------------------------------------------------------

@@ -256,7 +256,8 @@ def test_a_call_with_no_textual_overlap_is_flagged():
     person = applicant(applicant_type=ApplicantType.FOR_PROFIT_SMALL,
                        project_description="Solar powered water purification membranes for rural wells.",
                        sectors=[])
-    match = search.run(person, Corpus([unrelated]), today=TODAY).matches[0]
+    # Split out of the shortlist, and still carrying the note that says why.
+    match = search.run(person, Corpus([unrelated]), today=TODAY).unrelated[0]
     assert match.term_coverage < 0.12
     assert any("little in common" in n.text for n in match.notes)
 
@@ -444,3 +445,46 @@ def test_public_funders_without_a_feed_are_named_as_referrals():
     assert "African Development Bank" in names
     assert "UN Partner Portal" in names
     assert any(r.access.startswith("public") for r in result.referrals)
+
+
+# --- shortlist vs merely-eligible -------------------------------------------
+
+
+def test_eligible_but_unrelated_calls_are_split_out_of_the_shortlist():
+    """A shortlist containing everything the applicant qualifies for is not a shortlist."""
+    relevant = opportunity(
+        id="water", title="Drinking water purification research",
+        description="Solar powered purification of rural drinking water supplies.",
+        applicant_codes=["23"], sectors=[])
+    unrelated = opportunity(
+        id="swine", title="Feral swine eradication",
+        description="Control of feral swine populations on agricultural land.",
+        applicant_codes=["23"], sectors=[])
+    person = applicant(
+        applicant_type=ApplicantType.FOR_PROFIT_SMALL, sectors=[],
+        project_description="Solar powered water purification membranes for rural wells.")
+
+    result = search.run(person, Corpus([relevant, unrelated]), today=TODAY)
+    assert [m.opportunity.id for m in result.matches] == ["water"]
+    assert [m.opportunity.id for m in result.unrelated] == ["swine"]
+
+
+def test_unrelated_calls_are_kept_not_discarded():
+    """Keyword scoring is not certain enough to hide an eligible call entirely."""
+    unrelated = opportunity(id="swine", title="Feral swine eradication",
+                            description="Control of feral swine on farmland.",
+                            applicant_codes=["23"], sectors=[])
+    person = applicant(applicant_type=ApplicantType.FOR_PROFIT_SMALL, sectors=[],
+                       project_description="Solar water purification membranes.")
+    result = search.run(person, Corpus([unrelated]), today=TODAY)
+    assert result.matches == []
+    assert len(result.unrelated) == 1
+
+
+def test_without_a_description_nothing_is_demoted():
+    """Relevance was never computed, so it must not be used to bury anything."""
+    person = applicant(project_description="", sectors=[])
+    result = search.run(person, Corpus([opportunity(), opportunity(id="b", source_id="B")]),
+                        today=TODAY)
+    assert len(result.matches) == 2
+    assert result.unrelated == []

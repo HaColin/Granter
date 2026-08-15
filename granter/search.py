@@ -6,7 +6,7 @@ from datetime import date
 
 from .eligibility import entity_advisories, evaluate
 from .models import Applicant, Match, Note, Referral, SearchResult, Verdict
-from .ranking import score_matches
+from .ranking import MIN_TERM_COVERAGE, score_matches
 from .store import Corpus
 from .taxonomy import ApplicantType
 
@@ -112,6 +112,19 @@ def run(applicant: Applicant, corpus: Corpus, today: date | None = None) -> Sear
     score_matches(legal, matches)
     score_matches(legal, near)
 
+    # Scoring flags calls whose text has almost nothing in common with the
+    # project. They are eligible, so they are not discarded -- but a shortlist
+    # that includes every call the applicant merely qualifies for is not a
+    # shortlist, and burying the relevant ones among them is its own failure.
+    if applicant.project_description.strip():
+        unrelated = [m for m in matches if m.term_coverage < MIN_TERM_COVERAGE]
+        matches = [m for m in matches if m.term_coverage >= MIN_TERM_COVERAGE]
+    else:
+        # With no description there is nothing to measure relevance against, so
+        # everything stays in the main list rather than being demoted by a
+        # signal that was never computed.
+        unrelated = []
+
     advisories = entity_advisories(applicant)
     if corpus.is_empty:
         advisories.append(
@@ -129,6 +142,7 @@ def run(applicant: Applicant, corpus: Corpus, today: date | None = None) -> Sear
     return SearchResult(
         matches=matches,
         near_misses=near,
+        unrelated=unrelated,
         advisories=advisories,
         referrals=REFERRALS,
         corpus_size=len(corpus),

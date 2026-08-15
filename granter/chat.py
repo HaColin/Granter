@@ -19,6 +19,8 @@ from __future__ import annotations
 
 import json
 import os
+import re
+import sys
 from typing import Any
 
 import httpx
@@ -202,15 +204,61 @@ def _call_gemini(
         if owned:
             client.close()
 
-    try:
-        text = payload["candidates"][0]["content"]["parts"][0]["text"]
-    except (KeyError, IndexError, TypeError) as exc:
-        raise ChatUnavailable(f"unexpected response shape from {model}: {sorted(payload)}") from exc
+    return _parse_payload(payload, model)
+
+
+#: JSON wrapped in a markdown fence, which models emit even under a schema.
+_FENCE = re.compile(r"^\s*```(?:json)?\s*(.*?)\s*```\s*$", re.DOTALL)
+
+
+def _extract_text(payload: dict[str, Any], model: str) -> str:
+    """Pull the response text out, whatever shape the candidate arrives in.
+
+    This is the seam that cannot be tested without a live key, so it is written
+    to survive the variations the API is documented to produce -- a blocked
+    prompt, a candidate with no content, multiple parts -- and to say which one
+    happened rather than failing with a shape error.
+    """
+    feedback = payload.get("promptFeedback") or {}
+    if feedback.get("blockReason"):
+        raise ChatUnavailable(
+            f"Gemini blocked the request ({feedback['blockReason']}). Rephrase, or use the form."
+        )
+
+    candidates = payload.get("candidates")
+    if not candidates:
+        raise ChatUnavailable(
+            f"{model} returned no candidates. Response keys: {sorted(payload)}"
+        )
+
+    candidate = candidates[0]
+    parts = ((candidate.get("content") or {}).get("parts")) or []
+    text = "".join(str(p.get("text") or "") for p in parts if isinstance(p, dict)).strip()
+
+    if not text:
+        reason = candidate.get("finishReason") or "unknown"
+        if reason == "MAX_TOKENS":
+            raise ChatUnavailable("Gemini hit its output limit before finishing. Try a shorter message.")
+        raise ChatUnavailable(f"{model} returned an empty response (finishReason={reason}).")
+
+    return text
+
+
+def _parse_payload(payload: dict[str, Any], model: str) -> dict[str, Any]:
+    text = _extract_text(payload, model)
+
+    fenced = _FENCE.match(text)
+    if fenced:
+        text = fenced.group(1)
 
     try:
-        return json.loads(text)
+        parsed = json.loads(text)
     except json.JSONDecodeError as exc:
         raise ChatUnavailable("model did not return valid JSON") from exc
+
+    if not isinstance(parsed, dict):
+        raise ChatUnavailable(f"model returned {type(parsed).__name__}, expected an object")
+    return parsed
 
 
 # --- Merge ------------------------------------------------------------------
@@ -269,6 +317,19 @@ def turn(
 
     try:
         parsed = _call_gemini(messages, model=model, key=key, client=client)
+    except ChatUnavailable:
+        # A retired or renamed model is the likeliest silent breakage. Try the
+        # alternates before telling the user the chat is down.
+        for alternate in MODEL_CANDIDATES:
+            if alternate == model:
+                continue
+            try:
+                parsed = _call_gemini(messages, model=alternate, key=key, client=client)
+                break
+            except (ChatUnavailable, httpx.HTTPError):
+                continue
+        else:
+            raise
     except httpx.HTTPStatusError as exc:
         detail = exc.response.text[:200]
         raise ChatUnavailable(f"Gemini returned {exc.response.status_code}: {detail}") from exc
@@ -288,6 +349,52 @@ def turn(
     return reply, merged, ready
 
 
+#: Tried in order. The first is current; the rest cover a renamed or retired
+#: model, which is the likeliest way this breaks without any code changing.
+MODEL_CANDIDATES = (DEFAULT_MODEL, "gemini-flash-latest", "gemini-2.0-flash")
+
+
+def check(client: httpx.Client | None = None) -> int:
+    """Verify the key and the response shape against the live API.
+
+    Run as ``python -m granter.chat``. Prints what works, or precisely what does
+    not -- the first real call is the one thing the test suite cannot cover.
+    """
+    key = api_key()
+    if not key:
+        print("No API key. Set GEMINI_API_KEY (or GOOGLE_API_KEY) and retry.")
+        print("The form at / needs no key and works regardless.")
+        return 1
+
+    print(f"key found ({len(key)} chars), trying models in order...")
+    probe = [{"role": "user", "text": "We are a two-person nonprofit in Oregon planting trees."}]
+
+    for model in MODEL_CANDIDATES:
+        try:
+            parsed = _call_gemini(probe, model=model, key=key, client=client)
+        except ChatUnavailable as exc:
+            print(f"  {model}: {exc}")
+            continue
+        except httpx.HTTPStatusError as exc:
+            body = exc.response.text[:160].replace("\n", " ")
+            print(f"  {model}: HTTP {exc.response.status_code} — {body}")
+            continue
+        except httpx.HTTPError as exc:
+            print(f"  {model}: could not connect — {exc}")
+            continue
+
+        answers = merge_answers({}, parsed.get("answers") or {})
+        print(f"  {model}: OK")
+        print(f"    reply   : {str(parsed.get('reply'))[:80]}")
+        print(f"    answers : {answers}")
+        if model != DEFAULT_MODEL:
+            print(f"\nSet DEFAULT_MODEL to {model!r} in granter/chat.py — the default did not work.")
+        return 0
+
+    print("\nNo model worked. The form at / still does, and needs no key.")
+    return 1
+
+
 def humanise(answers: Answers) -> list[tuple[str, str]]:
     """The collected answers, as label/value pairs for the confirmation panel."""
     labels = {q.name: q.prompt for q in QUESTIONS}
@@ -305,3 +412,7 @@ def humanise(answers: Answers) -> list[tuple[str, str]]:
             shown = str(value)
         pretty.append((labels.get(name, name), shown))
     return pretty
+
+
+if __name__ == "__main__":
+    raise SystemExit(check())

@@ -218,6 +218,11 @@ class Referral(BaseModel):
 class SearchResult(BaseModel):
     matches: list[Match] = Field(default_factory=list)
     near_misses: list[Match] = Field(default_factory=list)
+    #: Eligible, but with almost nothing in common with the project described.
+    #: Kept out of the shortlist and counted rather than listed in full: a
+    #: thousand-row list is not a result, but hiding them entirely would be
+    #: claiming a certainty the keyword scoring does not have.
+    unrelated: list[Match] = Field(default_factory=list)
     #: Guidance shown before any list, e.g. the individual-eligibility talk.
     advisories: list[Note] = Field(default_factory=list)
     referrals: list[Referral] = Field(default_factory=list)

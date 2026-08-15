@@ -92,6 +92,20 @@
   {% for match in result.near_misses %}{{ card(match) }}{% endfor %}
 {% else %}<p class="none">None.</p>{% endif %}
 
+{% if result.unrelated %}
+<h2>Also eligible, but unrelated ({{ result.unrelated|length }})</h2>
+<p class="meta">You qualify for these, but their text has almost nothing in common with
+   your project description, so they are counted rather than listed. Matching is done on
+   words, not meaning — if your shortlist looks thin, try describing the project with
+   different concrete terms. The top few by score:</p>
+<ul>
+  {% for match in result.unrelated[:5] %}
+  <li><a href="{{ match.opportunity.source_url }}" target="_blank" rel="noopener">{{ match.opportunity.title }}</a>
+      <span class="none">— {{ match.opportunity.funder }}</span></li>
+  {% endfor %}
+</ul>
+{% endif %}
+
 <h2>Not searched — check these yourself</h2>
 <p class="meta">Granter has no feed for these. Some are behind paywalls; the rest are
    free but publish nothing machine-readable, so they have to be browsed by hand.

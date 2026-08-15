@@ -52,7 +52,12 @@ it with a key:
 
 ```bash
 export GEMINI_API_KEY=...        # or GOOGLE_API_KEY
+python -m granter.chat           # verify the key and the response shape
 ```
+
+`python -m granter.chat` makes one real call and reports exactly what worked or failed —
+the first live call is the one thing the test suite cannot cover. If the default model
+has been renamed, it tries alternates and tells you which to use.
 
 Without a key, `/chat` says so and points at the form. The form is never gated behind
 the model.
@@ -91,6 +96,11 @@ Those roll up into a verdict:
 * **Near miss** — your applicant type fits, but something else does not (budget above the
   ceiling, SAM.gov registration that cannot complete before the deadline). Shown in a
   separate list, labelled, never mixed in with real matches.
+* **Also eligible, but unrelated** — you qualify, but the call's text has almost nothing
+  in common with your project. Counted, with the top few named, rather than listed in
+  full. On a 2,484-record corpus this is the difference between a 32-row shortlist and a
+  1,607-row one. They are not discarded: keyword scoring is not certain enough to hide
+  an eligible call outright.
 * **Not eligible** — the call excludes your type, or the deadline has passed. Not shown.
 
 Confidence is separate from verdict: it drops to `low` whenever the source document left
@@ -172,7 +182,7 @@ granter/
   sources/eu_portal.py   EU Funding & Tenders connector
   chat.py               conversational intake via Gemini (optional)
   app.py, templates/    FastAPI + server-rendered HTML
-tests/                  122 tests; fixtures are synthetic and clearly marked
+tests/                  132 tests; fixtures are synthetic and clearly marked
 ```
 
 ## Verifying the connector after an upstream change
