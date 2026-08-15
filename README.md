@@ -23,6 +23,16 @@ and are never loaded by the application.
 
 ## Running it
 
+On Windows, double-click **Start Granter.bat**. It installs what it needs, fetches the
+opportunities if there are none yet, and opens the browser. Everything below is what it
+does for you.
+
+```bash
+python -m granter.launch          # the same thing, from a terminal
+```
+
+Or step by step:
+
 ```bash
 pip install -r requirements.txt
 ```

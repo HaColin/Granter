@@ -389,3 +389,30 @@ def test_the_results_page_also_offers_both(web, api_key):
 def test_the_current_page_is_marked(web, api_key):
     assert '<a href="/" aria-current="page"' in web.get("/").text
     assert '<a href="/chat" aria-current="page"' in web.get("/chat").text
+
+
+def test_country_answers_are_validated_as_country_codes(api_key):
+    """A live call returned prompt scaffolding and duplicates in this field."""
+    def handler(request):
+        return gemini_reply("ok", {"work_countries": [
+            "US violence_placeholder_cleanup?", "US", "US", "mx", "not-a-country",
+        ]})
+
+    _, answers, _ = chat.turn([], {}, client=client_returning(handler))
+    assert answers["work_countries"] == "US, MX"
+
+
+def test_country_codes_survive_a_comma_string(api_key):
+    def handler(request):
+        return gemini_reply("ok", {"work_countries": "us, ke, rubbish"})
+
+    _, answers, _ = chat.turn([], {}, client=client_returning(handler))
+    assert answers["work_countries"] == "US, KE"
+
+
+def test_all_invalid_countries_leave_the_field_unanswered(api_key):
+    def handler(request):
+        return gemini_reply("ok", {"work_countries": ["nowhere", "?"]})
+
+    _, answers, _ = chat.turn([], {}, client=client_returning(handler))
+    assert "work_countries" not in answers

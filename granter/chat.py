@@ -268,6 +268,28 @@ def _parse_payload(payload: dict[str, Any], model: str) -> dict[str, Any]:
 # --- Merge ------------------------------------------------------------------
 
 
+_COUNTRY_CODE = re.compile(r"^[A-Za-z]{2}$")
+
+
+def _country_codes(values: Any) -> list[str]:
+    """Keep only things shaped like ISO 3166-1 alpha-2 codes, in order, once each.
+
+    A live call returned ``["US violence_placeholder_cleanup?", "US", "US", "US"]``.
+    Joining that verbatim put prompt-scaffolding text and duplicates into an
+    answer the eligibility engine compares against a call's eligible countries.
+    Anything that is not a two-letter code is not a country.
+    """
+    if isinstance(values, str):
+        values = values.split(",")
+
+    seen: list[str] = []
+    for value in values or []:
+        code = str(value).strip().upper()
+        if _COUNTRY_CODE.match(code) and code not in seen:
+            seen.append(code)
+    return seen
+
+
 def _known_fields() -> frozenset[str]:
     """The survey's own field names. Nothing else is accepted from the model."""
     return frozenset(q.name for q in QUESTIONS)
@@ -298,7 +320,9 @@ def merge_answers(existing: Answers, incoming: dict[str, Any]) -> Answers:
         elif key == "sectors":
             merged[key] = [str(v) for v in value if str(v) in Sector._value2member_map_]
         elif key == "work_countries":
-            merged[key] = ", ".join(str(v) for v in value)
+            codes = _country_codes(value)
+            if codes:  # all-invalid is the same as unanswered, not an empty answer
+                merged[key] = ", ".join(codes)
         elif key in _STRING_FIELDS or isinstance(value, str):
             merged[key] = str(value)
     return merged
