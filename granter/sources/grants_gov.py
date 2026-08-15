@@ -88,16 +88,52 @@ def fetch_detail(client: httpx.Client, opportunity_id: str | int) -> dict[str, A
 # --- Normalisation ----------------------------------------------------------
 
 
-def _parse_date(value: Any) -> date | None:
-    """Grants.gov publishes dates as MMDDYYYY, occasionally as ISO."""
-    if not value:
+#: Every date shape seen or plausibly returned by the API. Order matters only
+#: for ambiguity, and none of these are ambiguous with each other.
+DATE_FORMATS = (
+    "%m%d%Y",  # 12312026
+    "%Y-%m-%d",  # 2026-12-31
+    "%m/%d/%Y",  # 12/31/2026
+    "%Y/%m/%d",
+    "%d-%b-%Y",  # 31-Dec-2026
+    "%b %d, %Y",  # Dec 31, 2026
+    "%B %d, %Y",  # December 31, 2026
+)
+
+
+def _parse_date(value: Any, warnings: list[str] | None = None, field: str = "") -> date | None:
+    """Read a published date, or record why it could not be read.
+
+    A date that is present but unparseable is a different failure from a date
+    the funder never published, and it must not be silently flattened into the
+    same ``None``: the first is a bug here, the second is a fact about the call.
+    """
+    if value in (None, "", "null"):
         return None
+
     text = str(value).strip()
-    for fmt in ("%m%d%Y", "%Y-%m-%d", "%m/%d/%Y"):
+
+    # ISO 8601 with a time component, with or without a timezone or millis.
+    try:
+        return datetime.fromisoformat(text.replace("Z", "+00:00")).date()
+    except ValueError:
+        pass
+
+    for fmt in DATE_FORMATS:
         try:
             return datetime.strptime(text, fmt).date()
         except ValueError:
             continue
+
+    # Epoch milliseconds, as some JSON APIs emit for date fields.
+    if text.isdigit() and len(text) == 13:
+        try:
+            return datetime.fromtimestamp(int(text) / 1000).date()
+        except (ValueError, OSError):
+            pass
+
+    if warnings is not None:
+        warnings.append(f"{field or 'date'}={text!r} did not match any known format")
     return None
 
 
@@ -223,6 +259,7 @@ def normalise(detail: dict[str, Any]) -> Opportunity:
         return synopsis.get(pair[1 if is_forecast else 0]) or synopsis.get(pair[0])
 
     missing: list[str] = []
+    warnings: list[str] = []
 
     def track(name: str, value: Any) -> Any:
         if value in (None, "", []):
@@ -241,7 +278,9 @@ def normalise(detail: dict[str, Any]) -> Opportunity:
         or "Unknown agency"
     )
 
-    close_date = track("close_date", _parse_date(either(_DATE_FIELDS["close"])))
+    close_date = track(
+        "close_date", _parse_date(either(_DATE_FIELDS["close"]), warnings, "close_date")
+    )
     ceiling = track("award_ceiling", _parse_money(synopsis.get("awardCeiling")))
     floor = track("award_floor", _parse_money(synopsis.get("awardFloor")))
     cost_share = synopsis.get("costSharing")
@@ -266,7 +305,7 @@ def normalise(detail: dict[str, Any]) -> Opportunity:
         award_ceiling=ceiling,
         total_pool=_parse_money(synopsis.get("estimatedFunding")),
         expected_awards=_parse_money(synopsis.get("expectedNumberOfAwards")),
-        posted_date=_parse_date(either(_DATE_FIELDS["posted"])),
+        posted_date=_parse_date(either(_DATE_FIELDS["posted"]), warnings, "posted_date"),
         close_date=close_date,
         is_forecast=is_forecast,
         jurisdiction="US",
@@ -276,6 +315,7 @@ def normalise(detail: dict[str, Any]) -> Opportunity:
         steps=_steps(str(opportunity_id), forms),
         fetched_at=utcnow(),
         missing_fields=sorted(set(missing)),
+        parse_warnings=warnings,
     )
 
 

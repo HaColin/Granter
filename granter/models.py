@@ -89,6 +89,10 @@ class Opportunity(BaseModel):
     fetched_at: datetime
     #: Fields the normaliser could not populate from the source document.
     missing_fields: list[str] = Field(default_factory=list)
+    #: Values the source did publish but this code could not read. These are
+    #: bugs here, not gaps in the source, and are kept distinct from
+    #: ``missing_fields`` so they can be found and fixed.
+    parse_warnings: list[str] = Field(default_factory=list)
 
     def days_remaining(self, today: date | None = None) -> int | None:
         if self.close_date is None:

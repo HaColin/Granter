@@ -104,6 +104,18 @@ def main(argv: list[str] | None = None) -> int:
     incomplete = sum(1 for r in merged if r.missing_fields)
     print(f"wrote {len(merged)} records to {path}")
     print(f"  {len(records)} fetched this run, {incomplete} with fields the source did not publish")
+
+    with_dates = sum(1 for r in records if r.close_date or r.rolling)
+    print(f"  {with_dates}/{len(records)} have a usable deadline")
+
+    # A value the source published but this code could not read is a bug here.
+    # Print it rather than letting a whole corpus quietly lose its deadlines.
+    unreadable = [w for r in records for w in r.parse_warnings]
+    if unreadable:
+        print(f"\n  {len(unreadable)} value(s) could not be parsed -- this is a bug in the "
+              "normaliser, not missing source data:", file=sys.stderr)
+        for warning in sorted(set(unreadable))[:10]:
+            print(f"    {warning}", file=sys.stderr)
     return 0
 
 

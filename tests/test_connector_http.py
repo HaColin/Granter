@@ -140,3 +140,49 @@ def test_hits_without_an_id_are_ignored():
 
     with make_client(handler) as client:
         assert grants_gov.collect(limit=1, client=client) == []
+
+
+# --- date parsing -----------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "raw,expected",
+    [
+        ("12312026", "2026-12-31"),
+        ("2026-12-31", "2026-12-31"),
+        ("12/31/2026", "2026-12-31"),
+        ("2026/12/31", "2026-12-31"),
+        ("31-Dec-2026", "2026-12-31"),
+        ("Dec 31, 2026", "2026-12-31"),
+        ("December 31, 2026", "2026-12-31"),
+        ("2026-12-31T00:00:00", "2026-12-31"),
+        ("2026-12-31T00:00:00Z", "2026-12-31"),
+        ("2026-12-31T00:00:00.000+00:00", "2026-12-31"),
+    ],
+)
+def test_every_plausible_date_shape_is_read(raw, expected):
+    assert grants_gov._parse_date(raw).isoformat() == expected
+
+
+def test_an_absent_date_produces_no_warning():
+    warnings: list[str] = []
+    assert grants_gov._parse_date(None, warnings, "close_date") is None
+    assert grants_gov._parse_date("", warnings, "close_date") is None
+    assert warnings == []
+
+
+def test_an_unreadable_date_is_reported_not_swallowed():
+    """A published value we cannot read is a bug here, not a gap in the source."""
+    warnings: list[str] = []
+    assert grants_gov._parse_date("sometime next spring", warnings, "close_date") is None
+    assert warnings and "close_date" in warnings[0] and "next spring" in warnings[0]
+
+
+def test_parse_warnings_reach_the_record():
+    record = grants_gov.normalise({
+        "id": 5,
+        "opportunityTitle": "T",
+        "synopsis": {**synopsis(), "responseDate": "whenever"},
+    })
+    assert record.close_date is None
+    assert record.parse_warnings and "close_date" in record.parse_warnings[0]
