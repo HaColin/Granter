@@ -4,7 +4,11 @@
 
 <h1>Granter</h1>
 <p class="lede">Answer these and get a ranked list of grants you are plausibly eligible for,
-with the official links, deadlines, and the forms each one requires.</p>
+with the official links, deadlines, and the forms each one requires.
+{% if chat_available %}
+Prefer to just describe it? <a href="/chat">Answer in a chat instead</a> — it fills in
+this same form, and you can review everything before searching.
+{% endif %}</p>
 
 {% if corpus.is_empty %}
 <div class="banner bad">

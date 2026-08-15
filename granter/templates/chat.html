@@ -1,0 +1,153 @@
+{% extends "base.html" %}
+{% block title %}Granter — chat intake{% endblock %}
+{% block body %}
+
+<h1>Granter</h1>
+<p class="lede">Describe your project in your own words and I'll fill in the intake form
+   for you. <a href="/">Prefer the form? It's here</a> — it needs no API key and always works.</p>
+
+{% if corpus.is_empty %}
+<div class="banner bad">
+  <strong>No opportunity data loaded.</strong> Run <code>python -m granter.ingest</code>
+  before searching.
+</div>
+{% endif %}
+
+{% if not chat_available %}
+<div class="banner bad">
+  <strong>Chat is switched off.</strong> It needs a Google Gemini API key. Set
+  <code>GEMINI_API_KEY</code> in your environment and restart the server, or
+  <a href="/">use the form</a> — the form needs no key and produces identical results.
+</div>
+{% else %}
+
+<div class="banner">
+  The assistant only fills in the survey. It has no access to grant data and never
+  decides what you are eligible for — that is done by the same deterministic engine the
+  form uses, against retrieved source documents.
+</div>
+
+<div class="panel" id="transcript" style="min-height:16rem; max-height:26rem; overflow-y:auto;"></div>
+
+<form id="chat-form" class="panel" style="display:flex; gap:.6rem; align-items:flex-start;">
+  <textarea id="entry" rows="2" style="flex:1; min-height:3.2rem;"
+            placeholder="e.g. We're a two-person startup in California building solar water purifiers, looking for about $50,000."></textarea>
+  <button type="submit" id="send">Send</button>
+</form>
+
+<div class="panel" id="collected-panel" hidden>
+  <strong>Collected so far</strong>
+  <p class="why">Everything here goes onto the form, where you can change it before searching.</p>
+  <ul class="notes" id="collected"></ul>
+</div>
+
+<form method="post" action="/results" id="submit-form" hidden></form>
+<p id="status" class="meta"></p>
+
+<script>
+(function () {
+  const transcript = document.getElementById("transcript");
+  const collectedPanel = document.getElementById("collected-panel");
+  const collected = document.getElementById("collected");
+  const entry = document.getElementById("entry");
+  const send = document.getElementById("send");
+  const statusLine = document.getElementById("status");
+  const submitForm = document.getElementById("submit-form");
+
+  const messages = [];
+  let answers = {};
+
+  function bubble(role, text) {
+    const el = document.createElement("p");
+    el.style.margin = ".5rem 0";
+    el.innerHTML = (role === "user" ? "<strong>You:</strong> " : "<strong>Granter:</strong> ") +
+                   text.replace(/&/g, "&amp;").replace(/</g, "&lt;");
+    transcript.appendChild(el);
+    transcript.scrollTop = transcript.scrollHeight;
+  }
+
+  bubble("assistant", {{ opening | tojson }});
+  messages.push({ role: "assistant", text: {{ opening | tojson }} });
+
+  function renderCollected(pairs) {
+    collected.innerHTML = "";
+    for (const [label, value] of pairs) {
+      const li = document.createElement("li");
+      li.className = "match";
+      li.textContent = label + " — " + value;
+      collected.appendChild(li);
+    }
+    collectedPanel.hidden = pairs.length === 0;
+  }
+
+  // The collected answers are posted to /results as an ordinary form, so the
+  // chat path and the form path run through exactly the same code.
+  function submitToResults() {
+    submitForm.innerHTML = "";
+    for (const [name, value] of Object.entries(answers)) {
+      const values = Array.isArray(value) ? value : [value];
+      for (const v of values) {
+        const input = document.createElement("input");
+        input.type = "hidden";
+        input.name = name;
+        input.value = v;
+        submitForm.appendChild(input);
+      }
+    }
+    submitForm.submit();
+  }
+
+  document.getElementById("chat-form").addEventListener("submit", async function (event) {
+    event.preventDefault();
+    const text = entry.value.trim();
+    if (!text) return;
+
+    bubble("user", text);
+    messages.push({ role: "user", text: text });
+    entry.value = "";
+    send.disabled = true;
+    statusLine.textContent = "Thinking…";
+
+    try {
+      const response = await fetch("/chat/message", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ messages: messages, answers: answers }),
+      });
+      const data = await response.json();
+
+      if (!response.ok) {
+        statusLine.textContent = data.error || "The assistant is unavailable.";
+        bubble("assistant", "I can't reach the assistant right now — you can still " +
+                            "use the form, which needs no API key.");
+        return;
+      }
+
+      answers = data.answers || answers;
+      bubble("assistant", data.reply);
+      messages.push({ role: "assistant", text: data.reply });
+      renderCollected(data.collected || []);
+      statusLine.textContent = "";
+
+      if (data.ready) {
+        statusLine.textContent = "Running the search…";
+        submitToResults();
+      }
+    } catch (err) {
+      statusLine.textContent = "Network error: " + err.message;
+    } finally {
+      send.disabled = false;
+      entry.focus();
+    }
+  });
+
+  entry.addEventListener("keydown", function (event) {
+    if (event.key === "Enter" && !event.shiftKey) {
+      event.preventDefault();
+      document.getElementById("chat-form").requestSubmit();
+    }
+  });
+})();
+</script>
+{% endif %}
+{% endblock %}

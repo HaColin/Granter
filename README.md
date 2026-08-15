@@ -42,6 +42,29 @@ python -m uvicorn granter.app:app --reload
 Then open http://localhost:8000. With an empty corpus the app says so and refuses to
 show results rather than filling the page with something it did not retrieve.
 
+## Two ways in
+
+The form at `/` is the primary path and needs no API key.
+
+`/chat` is a conversational alternative: describe the project in plain language and a
+Google Gemini model fills in the same survey, which you review before searching. Enable
+it with a key:
+
+```bash
+export GEMINI_API_KEY=...        # or GOOGLE_API_KEY
+```
+
+Without a key, `/chat` says so and points at the form. The form is never gated behind
+the model.
+
+**The model fills in the form and does nothing else.** It has no access to grant data,
+never names a grant or a deadline, and never decides eligibility — the structured
+response schema it is constrained to contains exactly the survey's own fields and
+nowhere for an opportunity to be returned. Its output is parsed into an `Applicant` and
+handed to the same deterministic engine the form feeds, and the required fields are
+checked here rather than trusted from the model. The worst a hallucination can do is
+mis-fill a survey field you can see and correct.
+
 Run the tests:
 
 ```bash
@@ -147,8 +170,9 @@ granter/
   sources/grants_gov.py federal connector
   sources/ca_grants.py   California state connector
   sources/eu_portal.py   EU Funding & Tenders connector
+  chat.py               conversational intake via Gemini (optional)
   app.py, templates/    FastAPI + server-rendered HTML
-tests/                  105 tests; fixtures are synthetic and clearly marked
+tests/                  122 tests; fixtures are synthetic and clearly marked
 ```
 
 ## Verifying the connector after an upstream change
