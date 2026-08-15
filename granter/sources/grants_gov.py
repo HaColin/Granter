@@ -250,10 +250,20 @@ def normalise(detail: dict[str, Any]) -> Opportunity:
     )
 
 
-def collect(keyword: str = "", limit: int = 50) -> list[Opportunity]:
-    """Search, fetch details, and normalise. One record per usable opportunity."""
+def collect(
+    keyword: str = "",
+    limit: int = 50,
+    client: httpx.Client | None = None,
+) -> list[Opportunity]:
+    """Search, fetch details, and normalise. One record per usable opportunity.
+
+    ``client`` is injectable so the paging and error handling can be tested
+    without touching the network.
+    """
+    owned = client is None
+    client = client or httpx.Client(headers={"User-Agent": "Granter/0.1 (grant discovery)"})
     records: list[Opportunity] = []
-    with httpx.Client(headers={"User-Agent": "Granter/0.1 (grant discovery)"}) as client:
+    try:
         for hit in search(client, keyword=keyword, limit=limit):
             hit_id = hit.get("id")
             if hit_id is None:
@@ -264,4 +274,7 @@ def collect(keyword: str = "", limit: int = 50) -> list[Opportunity]:
                 # Skip loudly: a record we cannot normalise is dropped, never
                 # patched up with defaults.
                 print(f"  skipped opportunity {hit_id}: {exc}")
+    finally:
+        if owned:
+            client.close()
     return records

@@ -391,8 +391,10 @@ def _check_prerequisites(applicant: Applicant, opp: Opportunity, today: date) ->
         )
 
     for prereq in opp.prerequisites:
+        # Skip the ones that already have a dedicated check above, so the same
+        # requirement is not reported twice.
         low = prereq.lower()
-        if "sam" in low or "uei" in low:
+        if "sam" in low or "uei" in low or "grants.gov" in low:
             continue
         notes.append(Note(kind="caution", field="prerequisites", text=f"Prerequisite: {prereq}"))
 

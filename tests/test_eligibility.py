@@ -187,6 +187,24 @@ def test_missing_sam_registration_with_time_is_only_a_caution():
     assert any(n.field == "sam_uei_status" and n.kind == "caution" for n in match.notes)
 
 
+def test_a_prerequisite_is_not_reported_twice():
+    match = evaluate(
+        applicant(),
+        opportunity(source="grants_gov",
+                    prerequisites=["SAM.gov registration with an active UEI", "Grants.gov account"]),
+        today=TODAY,
+    )
+    texts = [n.text for n in match.notes]
+    assert sum("Grants.gov account" in t for t in texts) == 1
+    assert sum("SAM.gov" in t for t in texts) == 1
+
+
+def test_an_unrelated_prerequisite_is_still_surfaced():
+    match = evaluate(applicant(), opportunity(prerequisites=["Letter of intent due 30 days prior"]),
+                     today=TODAY)
+    assert any("Letter of intent" in n.text for n in match.notes)
+
+
 def test_unpublished_cost_share_is_reported_as_unknown():
     match = evaluate(applicant(), opportunity(cost_share_required=None), today=TODAY)
     assert any(n.field == "cost_share_required" and n.kind == "unknown" for n in match.notes)
