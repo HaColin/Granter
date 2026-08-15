@@ -158,6 +158,12 @@ def test_hits_without_an_id_are_ignored():
         ("2026-12-31T00:00:00", "2026-12-31"),
         ("2026-12-31T00:00:00Z", "2026-12-31"),
         ("2026-12-31T00:00:00.000+00:00", "2026-12-31"),
+        # Real values observed in a live Grants.gov ingest: a date carrying a
+        # time and a named US timezone, which strptime cannot read portably.
+        ("Aug 07, 2028 12:00:00 AM EDT", "2028-08-07"),
+        ("Dec 31, 2026 11:59:59 PM EST", "2026-12-31"),
+        ("December 31, 2026 05:00:00 PM PST", "2026-12-31"),
+        ("12/31/2026 12:00:00 AM EDT", "2026-12-31"),
     ],
 )
 def test_every_plausible_date_shape_is_read(raw, expected):

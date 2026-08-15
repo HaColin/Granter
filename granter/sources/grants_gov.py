@@ -13,6 +13,7 @@ that would look authoritative in the results list.
 
 from __future__ import annotations
 
+import re
 from datetime import date, datetime
 from typing import Any
 
@@ -100,6 +101,15 @@ DATE_FORMATS = (
     "%B %d, %Y",  # December 31, 2026
 )
 
+#: The date portion of a value that also carries a time and a timezone, e.g.
+#: "Aug 07, 2028 12:00:00 AM EDT" or "08/07/2028 12:00:00 AM EDT".
+_DATE_PREFIXES = (
+    (re.compile(r"^\s*([A-Za-z]{3,9}\s+\d{1,2},\s*\d{4})\b"), "%b %d, %Y"),
+    (re.compile(r"^\s*([A-Za-z]{4,9}\s+\d{1,2},\s*\d{4})\b"), "%B %d, %Y"),
+    (re.compile(r"^\s*(\d{1,2}/\d{1,2}/\d{4})\b"), "%m/%d/%Y"),
+    (re.compile(r"^\s*(\d{4}-\d{2}-\d{2})\b"), "%Y-%m-%d"),
+)
+
 
 def _parse_date(value: Any, warnings: list[str] | None = None, field: str = "") -> date | None:
     """Read a published date, or record why it could not be read.
@@ -124,6 +134,18 @@ def _parse_date(value: Any, warnings: list[str] | None = None, field: str = "") 
             return datetime.strptime(text, fmt).date()
         except ValueError:
             continue
+
+    # Dates carrying a time and a timezone abbreviation, e.g.
+    # "Aug 07, 2028 12:00:00 AM EDT". strptime cannot portably read a named US
+    # timezone, and the time of day is not information this tool uses, so read
+    # the leading date and discard the rest.
+    for pattern, fmt in _DATE_PREFIXES:
+        match = pattern.match(text)
+        if match:
+            try:
+                return datetime.strptime(match.group(1), fmt).date()
+            except ValueError:
+                continue
 
     # Epoch milliseconds, as some JSON APIs emit for date fields.
     if text.isdigit() and len(text) == 13:
