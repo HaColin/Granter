@@ -231,7 +231,10 @@ def test_a_retired_model_falls_back_to_an_alternate(api_key):
     seen: list[str] = []
 
     def handler(request):
-        model = str(request.url).split("/models/")[1].split(":")[0]
+        url = str(request.url)
+        if "/models/" not in url:  # ListModels
+            return httpx.Response(200, json={"models": []})
+        model = url.split("/models/")[1].split(":")[0]
         seen.append(model)
         if model == chat.DEFAULT_MODEL:
             return httpx.Response(200, json={"error": {"message": "model not found"}})
@@ -240,6 +243,49 @@ def test_a_retired_model_falls_back_to_an_alternate(api_key):
     reply, answers, _ = chat.turn([], {}, client=client_returning(handler))
     assert reply == "ok"
     assert seen[0] == chat.DEFAULT_MODEL and len(seen) > 1
+
+
+def test_a_model_the_key_can_call_is_discovered_when_the_built_ins_all_fail(api_key, monkeypatch):
+    """Hard-coded names rot. When they all 404, ask the API what exists."""
+    monkeypatch.setattr(chat, "_resolved_model", None)
+    seen: list[str] = []
+
+    def handler(request):
+        url = str(request.url)
+        if "/models/" not in url:
+            return httpx.Response(200, json={"models": [
+                {"name": "models/gemini-9.9-flash", "supportedGenerationMethods": ["generateContent"]},
+                {"name": "models/text-embedding-99", "supportedGenerationMethods": ["embedContent"]},
+            ]})
+        model = url.split("/models/")[1].split(":")[0]
+        seen.append(model)
+        if model == "gemini-9.9-flash":
+            return gemini_reply("discovered", {"country": "US"})
+        return httpx.Response(404, text="no longer available to new users")
+
+    reply, _, _ = chat.turn([], {}, client=client_returning(handler))
+    assert reply == "discovered"
+    assert "gemini-9.9-flash" in seen
+
+
+def test_only_models_that_can_generate_text_are_considered(api_key):
+    def handler(request):
+        return httpx.Response(200, json={"models": [
+            {"name": "models/embedding-001", "supportedGenerationMethods": ["embedContent"]},
+            {"name": "models/gemini-x-flash", "supportedGenerationMethods": ["generateContent"]},
+        ]})
+
+    names = chat.list_models("k", client=client_returning(handler))
+    assert names == ["gemini-x-flash"]
+
+
+def test_flash_text_models_are_preferred_over_specialised_ones():
+    ranked = chat._rank_models([
+        "gemini-x-pro", "gemini-x-flash-image", "gemini-flash-latest",
+        "gemini-x-flash", "gemini-flash-lite-latest",
+    ])
+    assert ranked[0] == "gemini-flash-latest"
+    assert "image" in ranked[-1] or ranked[-1].endswith("pro")
 
 
 # --- routes -----------------------------------------------------------------

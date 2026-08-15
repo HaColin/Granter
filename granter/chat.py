@@ -30,7 +30,11 @@ from .models import GrantExperience, RegistrationStatus
 from .taxonomy import APPLICANT_TYPE_LABELS, SECTOR_LABELS, ApplicantType, Sector
 
 API_BASE = "https://generativelanguage.googleapis.com/v1beta/models"
-DEFAULT_MODEL = "gemini-2.5-flash"
+
+#: The floating alias rather than a pinned version. Pinned names get retired --
+#: gemini-2.5-flash started returning "no longer available to new users" -- and
+#: an alias survives that without a code change.
+DEFAULT_MODEL = "gemini-flash-latest"
 
 #: Fields the survey collects, and how they arrive back from the model.
 _STRING_FIELDS = ("legal_registration", "country", "region", "project_description", "project_start")
@@ -315,26 +319,38 @@ def turn(
             "or use the form, which needs no key."
         )
 
-    try:
-        parsed = _call_gemini(messages, model=model, key=key, client=client)
-    except ChatUnavailable:
-        # A retired or renamed model is the likeliest silent breakage. Try the
-        # alternates before telling the user the chat is down.
-        for alternate in MODEL_CANDIDATES:
-            if alternate == model:
-                continue
-            try:
-                parsed = _call_gemini(messages, model=alternate, key=key, client=client)
-                break
-            except (ChatUnavailable, httpx.HTTPError):
-                continue
-        else:
-            raise
-    except httpx.HTTPStatusError as exc:
-        detail = exc.response.text[:200]
-        raise ChatUnavailable(f"Gemini returned {exc.response.status_code}: {detail}") from exc
-    except httpx.HTTPError as exc:
-        raise ChatUnavailable(f"could not reach Gemini: {exc}") from exc
+    # A retired model answers with a 404 and a shape problem raises here, so
+    # both have to be handled by one loop -- catching them separately meant a
+    # 404 on the first model skipped the fallbacks entirely.
+    global _resolved_model
+    attempts = [_resolved_model or model]
+    attempts += [m for m in MODEL_CANDIDATES if m not in attempts]
+
+    last_error: Exception | None = None
+    parsed = None
+    for index, candidate in enumerate(attempts):
+        try:
+            parsed = _call_gemini(messages, model=candidate, key=key, client=client)
+            _resolved_model = candidate
+            break
+        except (ChatUnavailable, httpx.HTTPError) as exc:
+            last_error = exc
+            # Once the built-in names are exhausted, ask the API what this key
+            # can actually call rather than guessing at another name.
+            if index == len(attempts) - 1:
+                discovered = resolve_model(key, client)
+                if discovered and discovered not in attempts:
+                    attempts.append(discovered)
+
+    if parsed is None:
+        if isinstance(last_error, httpx.HTTPStatusError):
+            detail = last_error.response.text[:200].replace("\n", " ")
+            raise ChatUnavailable(
+                f"Gemini returned {last_error.response.status_code}: {detail}"
+            ) from last_error
+        if isinstance(last_error, httpx.HTTPError):
+            raise ChatUnavailable(f"could not reach Gemini: {last_error}") from last_error
+        raise last_error or ChatUnavailable("no model responded")
 
     reply = str(parsed.get("reply") or "").strip() or "Could you tell me a bit more?"
     merged = merge_answers(answers, parsed.get("answers") or {})
@@ -349,9 +365,70 @@ def turn(
     return reply, merged, ready
 
 
-#: Tried in order. The first is current; the rest cover a renamed or retired
-#: model, which is the likeliest way this breaks without any code changing.
-MODEL_CANDIDATES = (DEFAULT_MODEL, "gemini-flash-latest", "gemini-2.0-flash")
+#: Tried in order before falling back to asking the API what exists.
+MODEL_CANDIDATES = (DEFAULT_MODEL, "gemini-2.0-flash", "gemini-flash-lite-latest")
+
+#: Resolved model for this process, once something has been shown to work.
+_resolved_model: str | None = None
+
+
+def list_models(key: str, client: httpx.Client | None = None) -> list[str]:
+    """Ask the API which models this key can actually call.
+
+    Hard-coded model names rot: Google retires pinned versions and the same
+    code stops working with a 404 that names no replacement. Rather than guess
+    at the current generation, ask.
+    """
+    owned = client is None
+    client = client or httpx.Client(timeout=30.0)
+    try:
+        response = client.get(API_BASE, params={"key": key})
+        response.raise_for_status()
+        payload = response.json()
+    finally:
+        if owned:
+            client.close()
+
+    usable = []
+    for model in payload.get("models") or []:
+        methods = model.get("supportedGenerationMethods") or []
+        name = str(model.get("name") or "").removeprefix("models/")
+        if name and "generateContent" in methods:
+            usable.append(name)
+    return usable
+
+
+def _rank_models(names: list[str]) -> list[str]:
+    """Prefer flash-family text models: cheap, fast, and enough for form-filling."""
+    def key(name: str) -> tuple:
+        lowered = name.lower()
+        unsuitable = any(
+            word in lowered
+            for word in ("vision", "embedding", "aqa", "image", "tts", "audio", "live")
+        )
+        return (
+            unsuitable,
+            "flash" not in lowered,
+            "latest" not in lowered,
+            "lite" in lowered,
+            name,
+        )
+
+    return sorted(names, key=key)
+
+
+def resolve_model(key: str, client: httpx.Client | None = None) -> str | None:
+    """A model this key can call, discovered once and remembered."""
+    global _resolved_model
+    if _resolved_model:
+        return _resolved_model
+    try:
+        available = _rank_models(list_models(key, client))
+    except httpx.HTTPError:
+        return None
+    if available:
+        _resolved_model = available[0]
+    return _resolved_model
 
 
 def check(client: httpx.Client | None = None) -> int:
