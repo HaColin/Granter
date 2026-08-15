@@ -352,3 +352,32 @@ def test_the_review_panel_shows_nothing_without_a_survey_label():
     shown = dict(chat.humanise(smuggled))
     assert "Smith Foundation Grant" not in shown.values()
     assert not any("grant_name" in label for label in shown)
+
+
+# --- both ways in -----------------------------------------------------------
+
+
+def test_every_page_offers_both_ways_in(web, monkeypatch):
+    """Neither path is a dead end, and the form is never gated behind a key."""
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    monkeypatch.delenv("GOOGLE_API_KEY", raising=False)
+
+    for path in ("/", "/chat"):
+        text = web.get(path).text
+        assert 'href="/"' in text, f"{path} does not link to the form"
+        assert 'href="/chat"' in text, f"{path} does not link to the chat"
+        assert "No API key needed" in text
+
+
+def test_the_results_page_also_offers_both(web, api_key):
+    response = web.post("/results", data={
+        "applicant_type": "nonprofit_501c3", "country": "US",
+        "project_description": "Rural well testing.",
+    })
+    assert 'href="/chat"' in response.text
+    assert 'href="/"' in response.text
+
+
+def test_the_current_page_is_marked(web, api_key):
+    assert '<a href="/" aria-current="page"' in web.get("/").text
+    assert '<a href="/chat" aria-current="page"' in web.get("/chat").text

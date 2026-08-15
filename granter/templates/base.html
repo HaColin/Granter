@@ -60,10 +60,27 @@
   .none { color: var(--muted); font-style: italic; }
   footer { color:var(--muted); font-size:.85rem; border-top:1px solid var(--line);
            margin-top:3rem; padding-top:1rem; }
+  nav.ways { display:flex; gap:.5rem; margin:0 0 1.5rem; }
+  nav.ways a { flex:1; text-align:center; padding:.55rem .8rem; border:1px solid var(--line);
+               border-radius:8px; text-decoration:none; color:var(--muted);
+               background:var(--panel); font-weight:600; font-size:.95rem; }
+  nav.ways a small { display:block; font-weight:400; font-size:.78rem; opacity:.8; }
+  nav.ways a[aria-current="page"] { color:var(--accent); border-color:var(--accent); }
 </style>
 </head>
 <body>
 <main>
+{# Both ways in, on every page. The form is never gated behind the chat: it
+   needs no API key, and it is the path that always works. #}
+{% set path = request.url.path %}
+<nav class="ways">
+  <a href="/" {% if path == '/' %}aria-current="page"{% endif %}>
+    Fill in the form<small>No API key needed</small>
+  </a>
+  <a href="/chat" {% if path == '/chat' %}aria-current="page"{% endif %}>
+    Describe it in a chat<small>Fills the form for you</small>
+  </a>
+</nav>
 {% block body %}{% endblock %}
 <footer>
   <p>{{ free_access_note }}</p>
