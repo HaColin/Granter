@@ -187,8 +187,8 @@ def test_a_forecast_payload_normalises_from_its_own_field_names():
         "opportunityTitle": "Forecasted call",
         "forecast": {
             "agencyName": "Test Agency",
-            "estimatedApplicationDueDate": "06302027",
-            "estimatedPostDate": "03012027",
+            "estApplicationResponseDate": "06302027",
+            "estSynopsisPostingDate": "03012027",
             "awardCeiling": "500000",
             "applicantTypes": [{"id": "12"}],
             "forecastDesc": "An intention to fund.",

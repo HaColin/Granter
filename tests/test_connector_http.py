@@ -249,3 +249,24 @@ def test_html_entities_are_decoded_in_text():
     })
     assert record.title == "CHIPS Incentives Program – Facilities"
     assert record.description == "Awards & support for R&D"
+
+
+def test_forecast_dates_use_the_field_names_the_api_actually_returns():
+    """Confirmed against a live forecast payload, not inferred from the synopsis names."""
+    record = grants_gov.normalise({
+        "id": 20, "opportunityTitle": "Forecasted call",
+        "forecast": {
+            "agencyDetails": {"agencyName": "Test Agency"},
+            "estApplicationResponseDate": "Jun 23, 2025 12:00:00 AM EDT",
+            "estSynopsisPostingDate": "Apr 14, 2025 12:00:00 AM EDT",
+            "awardCeiling": "600000", "awardFloor": "450000",
+            "numberOfAwards": "9",
+            "applicantTypes": [{"id": "23"}],
+            "forecastDesc": "An intention to fund.",
+        },
+    })
+    assert record.is_forecast is True
+    assert record.close_date.isoformat() == "2025-06-23"
+    assert record.posted_date.isoformat() == "2025-04-14"
+    assert record.expected_awards == 9
+    assert record.parse_warnings == []

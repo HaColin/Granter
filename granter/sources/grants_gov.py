@@ -15,6 +15,8 @@ from __future__ import annotations
 
 import html
 import re
+import time
+from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime
 from typing import Any
 
@@ -40,9 +42,29 @@ class SourceShapeError(RuntimeError):
 # --- HTTP -------------------------------------------------------------------
 
 
+#: Transport failures here are dominated by intermittent DNS, which resolves on
+#: a retry. A shape error is never retried -- that is a bug, not a bad minute.
+MAX_ATTEMPTS = 3
+RETRY_BACKOFF_SECONDS = 1.5
+
+
 def _post(client: httpx.Client, url: str, body: dict[str, Any]) -> dict[str, Any]:
-    response = client.post(url, json=body, timeout=30.0)
-    response.raise_for_status()
+    last_error: Exception | None = None
+    for attempt in range(MAX_ATTEMPTS):
+        try:
+            response = client.post(url, json=body, timeout=30.0)
+            response.raise_for_status()
+            break
+        except (httpx.TransportError, httpx.HTTPStatusError) as exc:
+            # A 4xx is our fault and will fail identically next time.
+            if isinstance(exc, httpx.HTTPStatusError) and exc.response.status_code < 500:
+                raise
+            last_error = exc
+            if attempt < MAX_ATTEMPTS - 1:
+                time.sleep(RETRY_BACKOFF_SECONDS * (attempt + 1))
+    else:
+        raise last_error  # type: ignore[misc]
+
     payload = response.json()
     if payload.get("errorcode") not in (0, None):
         raise SourceShapeError(f"{url} returned errorcode={payload.get('errorcode')}: {payload.get('msg')}")
@@ -264,11 +286,15 @@ def _steps(opportunity_id: str, forms: list[FormReference]) -> list[ApplicationS
 DETAIL_BLOCKS = ("synopsis", "forecast")
 
 #: Field names differ between the two blocks. Left is synopsis, right is forecast.
+#: Confirmed against live payloads of both kinds -- the forecast names are not
+#: the synopsis names with "estimated" prefixed, which is what they were
+#: guessed to be, and the guess left all 556 forecasts with no deadline at all.
 _DATE_FIELDS = {
-    "close": ("responseDate", "estimatedApplicationDueDate"),
-    "posted": ("postingDate", "estimatedPostDate"),
+    "close": ("responseDate", "estApplicationResponseDate"),
+    "posted": ("postingDate", "estSynopsisPostingDate"),
 }
 _DESC_FIELDS = ("synopsisDesc", "forecastDesc")
+_AWARD_COUNT_FIELDS = ("expectedNumberOfAwards", "numberOfAwards")
 
 
 def detail_block(detail: dict[str, Any]) -> tuple[dict[str, Any], bool]:
@@ -352,7 +378,7 @@ def normalise(detail: dict[str, Any]) -> Opportunity:
         award_floor=floor,
         award_ceiling=ceiling,
         total_pool=_parse_money(synopsis.get("estimatedFunding")),
-        expected_awards=_parse_money(synopsis.get("expectedNumberOfAwards")),
+        expected_awards=_parse_money(either(_AWARD_COUNT_FIELDS)),
         posted_date=_parse_date(either(_DATE_FIELDS["posted"]), warnings, "posted_date"),
         close_date=close_date,
         is_forecast=is_forecast,
@@ -372,6 +398,8 @@ def collect(
     limit: int = 50,
     statuses: str = "posted",
     client: httpx.Client | None = None,
+    workers: int = 8,
+    progress: bool = True,
 ) -> list[Opportunity]:
     """Search, fetch details, and normalise. One record per usable opportunity.
 
@@ -379,19 +407,36 @@ def collect(
     without touching the network.
     """
     owned = client is None
-    client = client or httpx.Client(headers={"User-Agent": "Granter/0.1 (grant discovery)"})
+    client = client or httpx.Client(
+        headers={"User-Agent": "Granter/0.1 (grant discovery)"},
+        limits=httpx.Limits(max_connections=workers * 2),
+    )
     records: list[Opportunity] = []
     try:
-        for hit in search(client, keyword=keyword, statuses=statuses, limit=limit):
-            hit_id = hit.get("id")
-            if hit_id is None:
-                continue
+        hits = search(client, keyword=keyword, statuses=statuses, limit=limit)
+        ids = [h["id"] for h in hits if h.get("id") is not None]
+        if not ids:
+            return []
+
+        # Each opportunity needs its own detail request, so a full federal
+        # ingest is over a thousand round trips. Modest concurrency turns that
+        # from a quarter of an hour into about a minute; it is deliberately not
+        # higher, because this is a free public API.
+        def one(opportunity_id: Any) -> Opportunity | None:
             try:
-                records.append(normalise(fetch_detail(client, hit_id)))
+                return normalise(fetch_detail(client, opportunity_id))
             except (SourceShapeError, httpx.HTTPError) as exc:
                 # Skip loudly: a record we cannot normalise is dropped, never
                 # patched up with defaults.
-                print(f"  skipped opportunity {hit_id}: {exc}")
+                print(f"  skipped opportunity {opportunity_id}: {exc}")
+                return None
+
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            for done, record in enumerate(pool.map(one, ids), start=1):
+                if record is not None:
+                    records.append(record)
+                if progress and done % 200 == 0:
+                    print(f"  {done}/{len(ids)} fetched")
     finally:
         if owned:
             client.close()

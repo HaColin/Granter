@@ -102,9 +102,13 @@ Built on the machine-readable ones first:
 Fetch one source or all of them:
 
 ```bash
-python -m granter.ingest --source all --limit 400 --replace
+python -m granter.ingest --source all --limit 2000 --include-forecasted --replace
 python -m granter.ingest --source ca_grants --limit 300
 ```
+
+That pulls everything both sources publish — about 1,850 records — in well under a
+minute. Each federal opportunity needs its own detail request, so those run eight at a
+time; the concurrency is deliberately modest because this is a free public API.
 
 A source that is unreachable is reported and skipped; the others still land, and
 `--replace` only discards records from sources this run actually refetched.
@@ -128,7 +132,7 @@ granter/
   sources/grants_gov.py federal connector
   sources/ca_grants.py   California state connector
   app.py, templates/    FastAPI + server-rendered HTML
-tests/                  98 tests; fixtures are synthetic and clearly marked
+tests/                  99 tests; fixtures are synthetic and clearly marked
 ```
 
 ## Verifying the connector after an upstream change
