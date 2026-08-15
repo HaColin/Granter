@@ -2,7 +2,9 @@
   "mcpServers": {
     "granter": {
       "command": "python",
-      "args": ["-m", "granter.mcp_server"]
+      "args": [
+        "granter_mcp.py"
+      ]
     }
   }
 }

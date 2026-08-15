@@ -100,12 +100,29 @@ Granter runs as an MCP server, so Claude can search real opportunities instead o
 recalling programme names that may not exist:
 
 ```bash
-claude mcp add granter -- python -m granter.mcp_server
+claude mcp add granter -- python C:\path	o\Granter\granter_mcp.py
 ```
 
+Use `granter_mcp.py` with an absolute path, not `python -m granter.mcp_server`: a client
+starts its servers from its own working directory, not this one, and the module form
+fails there with an import error. The entry script puts the project on the path first,
+and the corpus location is derived from the package's own location, so both work from
+anywhere.
+
 The repo also carries `.mcp.json`, so Claude Code picks the server up automatically when
-run from this directory. For Claude Desktop, add the same command to
-`claude_desktop_config.json`.
+started from this directory. For Claude Desktop, add the same command to
+`claude_desktop_config.json`:
+
+```json
+{
+  "mcpServers": {
+    "granter": {
+      "command": "python",
+      "args": ["C:\path\to\Granter\granter_mcp.py"]
+    }
+  }
+}
+```
 
 Four tools: `search_grants`, `grant_details`, `corpus_status`, `intake_options`. Every
 result carries its official `source_url`, the date the record was checked, and the fields
