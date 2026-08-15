@@ -216,16 +216,28 @@ def _call_gemini(
 # --- Merge ------------------------------------------------------------------
 
 
+def _known_fields() -> frozenset[str]:
+    """The survey's own field names. Nothing else is accepted from the model."""
+    return frozenset(q.name for q in QUESTIONS)
+
+
 def merge_answers(existing: Answers, incoming: dict[str, Any]) -> Answers:
     """Fold newly extracted answers into what is already known.
+
+    Keys the survey does not define are dropped. Constraining the response
+    schema is not enough on its own: a model can return fields outside it, and
+    an invented ``grant_name`` or ``deadline`` would otherwise be merged in and
+    rendered in the review panel -- putting a fabricated grant in front of the
+    user through the one path that was supposed to make that impossible.
 
     A field the model omitted or blanked never erases an answer already given:
     the user said it once, and a later turn forgetting to repeat it is not them
     taking it back.
     """
+    allowed = _known_fields()
     merged = dict(existing)
     for key, value in (incoming or {}).items():
-        if value in (None, "", []):
+        if key not in allowed or value in (None, "", []):
             continue
         if key in _BOOL_FIELDS:
             merged[key] = "yes" if value else "no"
@@ -281,7 +293,9 @@ def humanise(answers: Answers) -> list[tuple[str, str]]:
     labels = {q.name: q.prompt for q in QUESTIONS}
     pretty: list[tuple[str, str]] = []
     for name, value in answers.items():
-        if value in (None, "", []):
+        # Second gate on the display path: nothing without a survey label is
+        # shown, whatever route put it into the answers dict.
+        if name not in labels or value in (None, "", []):
             continue
         if name == "applicant_type":
             shown = APPLICANT_TYPE_LABELS.get(ApplicantType(value), str(value))

@@ -221,3 +221,31 @@ def test_chat_page_states_the_model_does_not_decide_eligibility(web, api_key):
     text = " ".join(web.get("/chat").text.split())  # collapse HTML line wrapping
     assert "only fills in the survey" in text
     assert "no access to grant data and never decides what you are eligible for" in text
+
+
+def test_fields_the_survey_does_not_define_are_dropped(api_key):
+    """The schema constrains the model; it does not bind it.
+
+    A model that returns grant_name/deadline anyway must not have them merged
+    into the answers, or the review panel would display a fabricated grant --
+    through the one path designed to make that impossible.
+    """
+    def handler(request):
+        return gemini_reply("You qualify for the Smith Foundation Grant!", {
+            "country": "US",
+            "grant_name": "Smith Foundation Grant",
+            "deadline": "2026-12-01",
+            "award_amount": "$50,000",
+        })
+
+    _, answers, _ = chat.turn([], {}, client=client_returning(handler))
+    assert answers == {"country": "US"}
+    assert "grant_name" not in answers
+
+
+def test_the_review_panel_shows_nothing_without_a_survey_label():
+    """Second gate: even if something reaches the answers dict, it is not shown."""
+    smuggled = {"country": "US", "grant_name": "Smith Foundation Grant"}
+    shown = dict(chat.humanise(smuggled))
+    assert "Smith Foundation Grant" not in shown.values()
+    assert not any("grant_name" in label for label in shown)
