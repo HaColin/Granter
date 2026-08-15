@@ -314,10 +314,8 @@ def turn(
     """One conversational turn: (reply, accumulated answers, ready to submit)."""
     key = api_key()
     if not key:
-        raise ChatUnavailable(
-            "No Gemini API key configured. Set GEMINI_API_KEY to use the chat, "
-            "or use the form, which needs no key."
-        )
+        # Operator-facing wording: this is logged, never shown to a user.
+        raise ChatUnavailable("no API key configured (set GEMINI_API_KEY)")
 
     # A retired model answers with a 404 and a shape problem raises here, so
     # both have to be handled by one loop -- catching them separately meant a

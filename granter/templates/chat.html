@@ -4,20 +4,18 @@
 
 <h1>Granter</h1>
 <p class="lede">Describe your project in your own words and I'll fill in the intake form
-   for you. <a href="/">Prefer the form? It's here</a> — it needs no API key and always works.</p>
+   for you. <a href="/">Prefer to fill it in yourself?</a></p>
 
 {% if corpus.is_empty %}
 <div class="banner bad">
-  <strong>No opportunity data loaded.</strong> Run <code>python -m granter.ingest</code>
-  before searching.
+  <strong>No opportunities are available right now.</strong> Please try again later.
 </div>
 {% endif %}
 
 {% if not chat_available %}
 <div class="banner bad">
-  <strong>Chat is switched off.</strong> It needs a Google Gemini API key. Set
-  <code>GEMINI_API_KEY</code> in your environment and restart the server, or
-  <a href="/">use the form</a> — the form needs no key and produces identical results.
+  <strong>The assistant is unavailable right now.</strong>
+  <a href="/">Use the form instead</a> — it produces exactly the same results.
 </div>
 {% else %}
 
@@ -118,8 +116,8 @@
 
       if (!response.ok) {
         statusLine.textContent = data.error || "The assistant is unavailable.";
-        bubble("assistant", "I can't reach the assistant right now — you can still " +
-                            "use the form, which needs no API key.");
+        bubble("assistant", "I can't reach the assistant right now. " +
+                            "You can still use the form, which gives the same results.");
         return;
       }
 

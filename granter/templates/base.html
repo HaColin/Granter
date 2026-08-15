@@ -74,12 +74,8 @@
    needs no API key, and it is the path that always works. #}
 {% set path = request.url.path %}
 <nav class="ways">
-  <a href="/" {% if path == '/' %}aria-current="page"{% endif %}>
-    Fill in the form<small>No API key needed</small>
-  </a>
-  <a href="/chat" {% if path == '/chat' %}aria-current="page"{% endif %}>
-    Describe it in a chat<small>Fills the form for you</small>
-  </a>
+  <a href="/" {% if path == '/' %}aria-current="page"{% endif %}>Fill in the form</a>
+  <a href="/chat" {% if path == '/chat' %}aria-current="page"{% endif %}>Describe it in a chat</a>
 </nav>
 {% block body %}{% endblock %}
 <footer>

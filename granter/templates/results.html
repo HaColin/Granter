@@ -67,8 +67,8 @@
 <p class="lede">
   {{ applicant_labels[applicant.applicant_type] }} &middot; {{ applicant.country }}
   {%- if applicant.region %} / {{ applicant.region }}{% endif %} &middot;
-  searched {{ result.corpus_size }} retrieved opportunities
-  {%- if result.corpus_fetched_at %}, corpus last updated {{ result.corpus_fetched_at.date() }}{% endif %}.
+  searched {{ "{:,}".format(result.corpus_size) }} funding opportunities
+  {%- if result.corpus_fetched_at %}, last updated {{ result.corpus_fetched_at.strftime('%d %B %Y') }}{% endif %}.
   <a href="/">Start over</a>
 </p>
 
@@ -80,9 +80,9 @@
 {% if result.matches %}
   {% for match in result.matches %}{{ card(match) }}{% endfor %}
 {% else %}
-<p class="none">Nothing in the retrieved corpus matches your eligibility. That is a real
-   answer, not an error — no match is better than a fabricated one. Widen the ingest
-   (<code>python -m granter.ingest --keyword ...</code>) or check the sources below.</p>
+<p class="none">Nothing currently open matches your eligibility. That is a real answer,
+   not an error — no match is better than a fabricated one. Try describing your project
+   with different concrete terms, or check the sources below that are not searched here.</p>
 {% endif %}
 
 <h2>Near misses ({{ result.near_misses|length }})</h2>

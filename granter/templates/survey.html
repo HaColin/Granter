@@ -7,19 +7,17 @@
 with the official links, deadlines, and the forms each one requires.
 {% if chat_available %}
 Prefer to just describe it? <a href="/chat">Answer in a chat instead</a> — it fills in
-this same form, and you can review everything before searching.
+this same form, and you review everything before searching.
 {% endif %}</p>
 
 {% if corpus.is_empty %}
 <div class="banner bad">
-  <strong>No opportunity data loaded.</strong>
-  Granter will not show results it has not retrieved. Populate the corpus first:
-  <code>python -m granter.ingest</code>
+  <strong>No opportunities are available right now.</strong> Please try again later.
 </div>
 {% else %}
 <div class="banner good">
-  {{ corpus.records|length }} opportunities loaded
-  {%- if corpus.fetched_at %}, last checked {{ corpus.fetched_at.date() }}{% endif %}.
+  Searching {{ "{:,}".format(corpus.records|length) }} funding opportunities
+  {%- if corpus.fetched_at %}, last checked {{ corpus.fetched_at.strftime('%d %B %Y') }}{% endif %}.
 </div>
 {% endif %}
 

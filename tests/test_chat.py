@@ -44,7 +44,7 @@ def test_chat_is_unavailable_without_a_key(monkeypatch):
     monkeypatch.delenv("GEMINI_API_KEY", raising=False)
     monkeypatch.delenv("GOOGLE_API_KEY", raising=False)
     assert chat.is_available() is False
-    with pytest.raises(chat.ChatUnavailable, match="use the form"):
+    with pytest.raises(chat.ChatUnavailable, match="GEMINI_API_KEY"):
         chat.turn([], {})
 
 
@@ -302,8 +302,11 @@ def test_chat_page_offers_the_form_when_there_is_no_key(web, monkeypatch):
     monkeypatch.delenv("GOOGLE_API_KEY", raising=False)
     response = web.get("/chat")
     assert response.status_code == 200
-    assert "Chat is switched off" in response.text
+    assert "The assistant is unavailable right now" in response.text
     assert 'href="/"' in response.text
+    # No operator instructions: a user cannot act on an env var name.
+    assert "GEMINI_API_KEY" not in response.text
+    assert "restart the server" not in response.text
 
 
 def test_chat_endpoint_returns_503_rather_than_a_fake_answer(web, monkeypatch):
@@ -311,13 +314,16 @@ def test_chat_endpoint_returns_503_rather_than_a_fake_answer(web, monkeypatch):
     monkeypatch.delenv("GOOGLE_API_KEY", raising=False)
     response = web.post("/chat/message", json={"messages": [], "answers": {}})
     assert response.status_code == 503
-    assert "form" in response.json()["error"]
+    error = response.json()["error"]
+    assert "form" in error
+    # The provider detail is logged, not sent to the browser.
+    assert "GEMINI_API_KEY" not in error and "api key" not in error.lower()
 
 
 def test_the_form_still_works_and_is_linked_from_chat(web, api_key):
     assert web.get("/").status_code == 200
     assert "Answer in a chat instead" in web.get("/").text
-    assert "Prefer the form" in web.get("/chat").text
+    assert "Prefer to fill it in yourself?" in web.get("/chat").text
 
 
 def test_chat_page_states_the_model_does_not_decide_eligibility(web, api_key):
@@ -366,7 +372,9 @@ def test_every_page_offers_both_ways_in(web, monkeypatch):
         text = web.get(path).text
         assert 'href="/"' in text, f"{path} does not link to the form"
         assert 'href="/chat"' in text, f"{path} does not link to the chat"
-        assert "No API key needed" in text
+        # Nothing on a user-facing page should mention keys, commands or config.
+        for operator_detail in ("API key", "GEMINI_API_KEY", "granter.ingest", "uvicorn"):
+            assert operator_detail not in text, f"{path} leaks operator detail: {operator_detail}"
 
 
 def test_the_results_page_also_offers_both(web, api_key):

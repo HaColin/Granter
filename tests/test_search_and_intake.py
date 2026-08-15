@@ -35,7 +35,10 @@ def test_near_misses_are_separated_from_matches():
 def test_empty_corpus_says_so_instead_of_returning_nothing_silently():
     result = search.run(applicant(), Corpus([]), today=TODAY)
     assert result.matches == []
-    assert any("ingest" in n.text for n in result.advisories)
+    advisory = " ".join(n.text for n in result.advisories)
+    assert "No funding opportunities are available" in advisory
+    # Said in the user's terms, not as an instruction to run a command.
+    assert "ingest" not in advisory and "python" not in advisory
 
 
 def test_paywalled_sources_are_named_not_silently_skipped():

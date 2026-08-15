@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 
 from fastapi import FastAPI, Request
@@ -19,6 +20,8 @@ BASE_DIR = Path(__file__).resolve().parent
 templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
 
 app = FastAPI(title="Granter", description="Find grants you are actually eligible for.")
+
+logger = logging.getLogger("granter")
 
 VERDICT_LABELS = {
     Verdict.ELIGIBLE: "Eligible",
@@ -109,7 +112,14 @@ async def chat_message(request: Request) -> JSONResponse:
     try:
         reply, merged, ready = chat.turn(messages, answers)
     except chat.ChatUnavailable as exc:
-        return JSONResponse({"error": str(exc)}, status_code=503)
+        # The detail names API keys, model IDs and provider errors -- useful to
+        # whoever runs this, meaningless or alarming to the person using it. It
+        # goes to the server log; the browser gets the one thing that helps.
+        logger.warning("chat turn failed: %s", exc)
+        return JSONResponse(
+            {"error": "The assistant is unavailable right now. Please use the form instead."},
+            status_code=503,
+        )
 
     return JSONResponse(
         {

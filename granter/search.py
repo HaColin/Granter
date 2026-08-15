@@ -132,9 +132,9 @@ def run(applicant: Applicant, corpus: Corpus, today: date | None = None) -> Sear
                 kind="blocker",
                 field="corpus",
                 text=(
-                    "No opportunity records are loaded. Granter will not show results it has "
-                    "not retrieved. Run `python -m granter.ingest` to fetch live calls from "
-                    "Grants.gov first."
+                    "No funding opportunities are available to search right now. Granter "
+                    "will not show results it has not retrieved from a source, so nothing "
+                    "is listed below. Please try again later."
                 ),
             )
         )
