@@ -174,6 +174,20 @@ def _check_applicant_type(applicant: Applicant, opp: Opportunity) -> list[Note]:
 
 
 def _check_deadline(opp: Opportunity, today: date) -> list[Note]:
+    if opp.is_forecast:
+        due = f" The estimated due date is {opp.close_date.isoformat()}." if opp.close_date else ""
+        return [
+            Note(
+                kind="caution",
+                field="is_forecast",
+                text=(
+                    "This is a forecast, not an open call — the agency has announced an "
+                    "intention to fund but has not published the announcement yet. Dates and "
+                    "amounts are estimates and routinely change." + due
+                ),
+            )
+        ]
+
     if opp.rolling:
         return [Note(kind="match", field="close_date", text="Applications are accepted on a rolling basis.")]
 

@@ -184,15 +184,43 @@ def _steps(opportunity_id: str, forms: list[FormReference]) -> list[ApplicationS
     return steps
 
 
+#: The detail payload carries one of these blocks: ``synopsis`` for a posted
+#: call, ``forecast`` for one an agency has only announced an intention to fund.
+DETAIL_BLOCKS = ("synopsis", "forecast")
+
+#: Field names differ between the two blocks. Left is synopsis, right is forecast.
+_DATE_FIELDS = {
+    "close": ("responseDate", "estimatedApplicationDueDate"),
+    "posted": ("postingDate", "estimatedPostDate"),
+}
+_DESC_FIELDS = ("synopsisDesc", "forecastDesc")
+
+
+def detail_block(detail: dict[str, Any]) -> tuple[dict[str, Any], bool]:
+    """Return the payload's content block and whether it is a forecast."""
+    for index, name in enumerate(DETAIL_BLOCKS):
+        block = detail.get(name)
+        if isinstance(block, dict):
+            return block, bool(index)
+    raise SourceShapeError(
+        f"payload has none of {DETAIL_BLOCKS}; top-level keys were {sorted(detail)}"
+    )
+
+
 def normalise(detail: dict[str, Any]) -> Opportunity:
     """Turn one FetchOpportunity payload into an Opportunity record."""
     opportunity_id = detail.get("id") or detail.get("opportunityId")
     if opportunity_id is None:
         raise SourceShapeError("fetchOpportunity payload has no 'id'")
 
-    synopsis = detail.get("synopsis")
-    if not isinstance(synopsis, dict):
-        raise SourceShapeError(f"opportunity {opportunity_id} has no 'synopsis' object")
+    try:
+        synopsis, is_forecast = detail_block(detail)
+    except SourceShapeError as exc:
+        raise SourceShapeError(f"opportunity {opportunity_id}: {exc}") from exc
+
+    def either(pair: tuple[str, str]) -> Any:
+        """Read the field under whichever name this block uses."""
+        return synopsis.get(pair[1 if is_forecast else 0]) or synopsis.get(pair[0])
 
     missing: list[str] = []
 
@@ -213,7 +241,7 @@ def normalise(detail: dict[str, Any]) -> Opportunity:
         or "Unknown agency"
     )
 
-    close_date = track("close_date", _parse_date(synopsis.get("responseDate")))
+    close_date = track("close_date", _parse_date(either(_DATE_FIELDS["close"])))
     ceiling = track("award_ceiling", _parse_money(synopsis.get("awardCeiling")))
     floor = track("award_floor", _parse_money(synopsis.get("awardFloor")))
     cost_share = synopsis.get("costSharing")
@@ -231,15 +259,16 @@ def normalise(detail: dict[str, Any]) -> Opportunity:
         title=str(title).strip(),
         funder=str(funder).strip(),
         source_url=DETAIL_URL.format(id=opportunity_id),
-        description=str(synopsis.get("synopsisDesc") or "").strip(),
+        description=str(either(_DESC_FIELDS) or "").strip(),
         eligibility_text=str(synopsis.get("applicantEligibilityDesc") or "").strip(),
         applicant_codes=_applicant_codes(synopsis),
         award_floor=floor,
         award_ceiling=ceiling,
         total_pool=_parse_money(synopsis.get("estimatedFunding")),
         expected_awards=_parse_money(synopsis.get("expectedNumberOfAwards")),
-        posted_date=_parse_date(synopsis.get("postingDate")),
+        posted_date=_parse_date(either(_DATE_FIELDS["posted"])),
         close_date=close_date,
+        is_forecast=is_forecast,
         jurisdiction="US",
         cost_share_required=bool(cost_share) if cost_share is not None else None,
         prerequisites=["SAM.gov registration with an active UEI", "Grants.gov account"],
@@ -253,6 +282,7 @@ def normalise(detail: dict[str, Any]) -> Opportunity:
 def collect(
     keyword: str = "",
     limit: int = 50,
+    statuses: str = "posted",
     client: httpx.Client | None = None,
 ) -> list[Opportunity]:
     """Search, fetch details, and normalise. One record per usable opportunity.
@@ -264,7 +294,7 @@ def collect(
     client = client or httpx.Client(headers={"User-Agent": "Granter/0.1 (grant discovery)"})
     records: list[Opportunity] = []
     try:
-        for hit in search(client, keyword=keyword, limit=limit):
+        for hit in search(client, keyword=keyword, statuses=statuses, limit=limit):
             hit_id = hit.get("id")
             if hit_id is None:
                 continue

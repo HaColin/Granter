@@ -68,6 +68,9 @@ class Opportunity(BaseModel):
     close_date: date | None = None
     #: Some calls accept applications continuously.
     rolling: bool = False
+    #: A forecast is an announced intention to fund, not an open call. Its dates
+    #: and amounts are the agency's estimates and routinely change.
+    is_forecast: bool = False
 
     #: ISO 3166-1 alpha-2 of the funder's jurisdiction, e.g. "US".
     jurisdiction: str | None = None

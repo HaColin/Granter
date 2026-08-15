@@ -179,6 +179,49 @@ def test_unrecognised_payload_raises_instead_of_emitting_a_partial_record():
         grants_gov.normalise({"id": 1})  # no synopsis
 
 
+def test_a_forecast_payload_normalises_from_its_own_field_names():
+    """Forecasted opportunities carry a 'forecast' block, not a 'synopsis' one."""
+    detail = {
+        "id": 999,
+        "opportunityNumber": "TEST-26-FC",
+        "opportunityTitle": "Forecasted call",
+        "forecast": {
+            "agencyName": "Test Agency",
+            "estimatedApplicationDueDate": "06302027",
+            "estimatedPostDate": "03012027",
+            "awardCeiling": "500000",
+            "applicantTypes": [{"id": "12"}],
+            "forecastDesc": "An intention to fund.",
+        },
+    }
+    record = grants_gov.normalise(detail)
+    assert record.is_forecast is True
+    assert record.close_date.isoformat() == "2027-06-30"
+    assert record.posted_date.isoformat() == "2027-03-01"
+    assert record.description == "An intention to fund."
+    assert record.applicant_codes == ["12"]
+
+
+def test_a_payload_with_neither_block_names_the_keys_it_did_find():
+    import pytest
+
+    with pytest.raises(grants_gov.SourceShapeError, match="top-level keys"):
+        grants_gov.normalise({"id": 1, "somethingElse": {}})
+
+
+def test_a_forecast_is_labelled_as_an_estimate_not_a_deadline():
+    from datetime import date as _date
+
+    from granter.eligibility import evaluate
+
+    record = opportunity(is_forecast=True, close_date=_date(2027, 6, 30), source="demo")
+    match = evaluate(applicant(), record, today=TODAY)
+    note = next(n for n in match.notes if n.field == "is_forecast")
+    assert note.kind == "caution"
+    assert "not an open call" in note.text
+    assert "2027-06-30" in note.text
+
+
 def test_single_digit_applicant_codes_are_zero_padded():
     record = grants_gov.normalise(_detail(applicantTypes=[{"id": "7"}]))
     assert record.applicant_codes == ["07"]
