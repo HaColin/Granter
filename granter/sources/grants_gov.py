@@ -13,6 +13,7 @@ that would look authoritative in the results list.
 
 from __future__ import annotations
 
+import html
 import re
 from datetime import date, datetime
 from typing import Any
@@ -160,8 +161,12 @@ def _parse_date(value: Any, warnings: list[str] | None = None, field: str = "") 
 
 
 def _clean(value: Any) -> str:
-    """Collapse embedded newlines and runs of whitespace into single spaces."""
-    return re.sub(r"\s+", " ", str(value)).strip()
+    """Decode HTML entities and collapse whitespace.
+
+    Titles and descriptions arrive HTML-escaped ("CHIPS Incentives Program
+    &ndash; Facilities"), and agency fields carry embedded newlines.
+    """
+    return re.sub(r"\s+", " ", html.unescape(str(value))).strip()
 
 
 def _parse_money(value: Any) -> int | None:
@@ -305,13 +310,19 @@ def normalise(detail: dict[str, Any]) -> Opportunity:
     if not title:
         raise SourceShapeError(f"opportunity {opportunity_id} has no title")
 
-    # The top-level agency name is the reliable one. The synopsis field of the
-    # same name sometimes carries a contact person instead ("Lois E East\n
-    # Grantor"), which is not who is funding the work.
+    # ``synopsis.agencyName`` is NOT the agency: for many records it holds the
+    # contact person, byte-identical to agencyContactName ("Misty L Roosa\n
+    # Management Analyst"). The funder is in the agencyDetails object, with the
+    # parent department in topAgencyDetails. Never fall back to the synopsis
+    # field -- a wrong funder name is worse than a coarse one.
+    agency = detail.get("agencyDetails") or synopsis.get("agencyDetails") or {}
+    top_agency = detail.get("topAgencyDetails") or synopsis.get("topAgencyDetails") or {}
     funder = _clean(
-        detail.get("agencyName")
-        or detail.get("agencyCode")
-        or synopsis.get("agencyName")
+        agency.get("agencyName")
+        or top_agency.get("agencyName")
+        or detail.get("agencyName")
+        or agency.get("agencyCode")
+        or detail.get("owningAgencyCode")
         or "Unknown agency"
     )
 
@@ -335,8 +346,8 @@ def normalise(detail: dict[str, Any]) -> Opportunity:
         title=_clean(title),
         funder=funder,
         source_url=DETAIL_URL.format(id=opportunity_id),
-        description=str(either(_DESC_FIELDS) or "").strip(),
-        eligibility_text=str(synopsis.get("applicantEligibilityDesc") or "").strip(),
+        description=_clean(either(_DESC_FIELDS) or ""),
+        eligibility_text=_clean(synopsis.get("applicantEligibilityDesc") or ""),
         applicant_codes=_applicant_codes(synopsis),
         award_floor=floor,
         award_ceiling=ceiling,

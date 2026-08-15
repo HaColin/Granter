@@ -219,3 +219,33 @@ def test_whitespace_in_text_fields_is_collapsed():
     })
     assert record.title == "Rural Water Program"
     assert "\n" not in record.funder
+
+
+def test_the_funder_comes_from_agency_details_not_the_contact_person():
+    """synopsis.agencyName is the contact for many records, not the agency."""
+    record = grants_gov.normalise({
+        "id": 10, "opportunityTitle": "T",
+        "agencyDetails": {"agencyName": "National Institute of Standards and Technology"},
+        "topAgencyDetails": {"agencyName": "Department of Commerce"},
+        "synopsis": {**synopsis(), "agencyName": "Misty L Roosa\nManagement Analyst"},
+    })
+    assert record.funder == "National Institute of Standards and Technology"
+
+
+def test_the_parent_department_is_used_when_the_sub_agency_is_absent():
+    record = grants_gov.normalise({
+        "id": 11, "opportunityTitle": "T",
+        "topAgencyDetails": {"agencyName": "Department of Commerce"},
+        "synopsis": {**synopsis(), "agencyName": "A Contact Person"},
+    })
+    assert record.funder == "Department of Commerce"
+
+
+def test_html_entities_are_decoded_in_text():
+    record = grants_gov.normalise({
+        "id": 12, "opportunityTitle": "CHIPS Incentives Program &ndash; Facilities",
+        "agencyDetails": {"agencyName": "NIST"},
+        "synopsis": {**synopsis(), "synopsisDesc": "Awards &amp; support for R&amp;D"},
+    })
+    assert record.title == "CHIPS Incentives Program – Facilities"
+    assert record.description == "Awards & support for R&D"
