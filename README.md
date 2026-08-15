@@ -86,6 +86,29 @@ Run the tests:
 python -m pytest -q
 ```
 
+## Using it from Claude (MCP)
+
+Granter runs as an MCP server, so Claude can search real opportunities instead of
+recalling programme names that may not exist:
+
+```bash
+claude mcp add granter -- python -m granter.mcp_server
+```
+
+The repo also carries `.mcp.json`, so Claude Code picks the server up automatically when
+run from this directory. For Claude Desktop, add the same command to
+`claude_desktop_config.json`.
+
+Four tools: `search_grants`, `grant_details`, `corpus_status`, `intake_options`. Every
+result carries its official `source_url`, the date the record was checked, and the fields
+the funder did not publish. The tool descriptions instruct the calling model not to
+supplement the output with grants it remembers, not to override a blocker, and to treat
+an empty result as a real answer — which is the entire reason to expose this over MCP
+rather than let a model answer funding questions directly.
+
+`corpus_status` reports what is *not* covered, so a model can say so rather than
+implying the search was exhaustive.
+
 ## How a verdict is reached
 
 `granter/eligibility.py` runs each call through the same checks and returns the note that
