@@ -78,6 +78,22 @@ def test_informal_group_also_gets_the_advisory():
     assert any(n.kind == "blocker" for n in notes)
 
 
+def test_informal_group_sees_calls_open_to_individuals():
+    """The only route open to them must not be filtered out of the list."""
+    match = evaluate(applicant(applicant_type=ApplicantType.INFORMAL_GROUP),
+                     opportunity(applicant_codes=["21"]), today=TODAY)
+    assert match.verdict is not Verdict.INELIGIBLE
+    assert any(
+        n.field == "applicant_type" and "named applicant" in n.text for n in match.notes
+    )
+
+
+def test_informal_group_is_still_excluded_from_organisation_only_calls():
+    match = evaluate(applicant(applicant_type=ApplicantType.INFORMAL_GROUP),
+                     opportunity(applicant_codes=["12"]), today=TODAY)
+    assert match.verdict is Verdict.INELIGIBLE
+
+
 def test_fiscal_sponsor_changes_the_advisory_to_a_caution():
     notes = entity_advisories(
         applicant(applicant_type=ApplicantType.INDIVIDUAL, has_fiscal_sponsor=True)
@@ -122,9 +138,16 @@ def test_request_slightly_above_ceiling_is_only_a_caution():
     assert any(n.field == "award_ceiling" and n.kind == "caution" for n in match.notes)
 
 
-def test_request_below_floor_is_a_caution():
+def test_request_far_below_floor_is_a_near_miss():
     match = evaluate(applicant(amount_sought=1_000), opportunity(), today=TODAY)
+    assert any(n.field == "award_floor" and n.kind == "blocker" for n in match.notes)
+    assert match.verdict is Verdict.NEAR_MISS
+
+
+def test_request_slightly_below_floor_is_only_a_caution():
+    match = evaluate(applicant(amount_sought=20_000), opportunity(), today=TODAY)
     assert any(n.field == "award_floor" and n.kind == "caution" for n in match.notes)
+    assert match.verdict is not Verdict.NEAR_MISS
 
 
 # --- geography --------------------------------------------------------------

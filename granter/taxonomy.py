@@ -76,9 +76,10 @@ APPLICANT_TYPE_LABELS: dict[ApplicantType, str] = {
 #: Deliberately conservative: a type is listed only where the mapping is exact.
 APPLICANT_TYPE_TO_CODES: dict[ApplicantType, frozenset[str]] = {
     ApplicantType.INDIVIDUAL: frozenset({"21"}),
-    # An unincorporated group is not a legal person. It maps to nothing on its
-    # own; it is handled by the no-legal-entity path in eligibility.py.
-    ApplicantType.INFORMAL_GROUP: frozenset(),
+    # An unincorporated group is not a legal person, so the group cannot hold an
+    # award. It maps to "Individuals" because the route that exists is for one
+    # member to be the named applicant -- see the caution in eligibility.py.
+    ApplicantType.INFORMAL_GROUP: frozenset({"21"}),
     ApplicantType.NONPROFIT_501C3: frozenset({"12"}),
     ApplicantType.NONPROFIT_OTHER: frozenset({"13"}),
     ApplicantType.FOR_PROFIT_SMALL: frozenset({"23"}),

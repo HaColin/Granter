@@ -125,13 +125,26 @@ def _check_applicant_type(applicant: Applicant, opp: Opportunity) -> list[Note]:
     exact = allowed & set(opp.applicant_codes)
     if exact:
         names = ", ".join(GRANTS_GOV_APPLICANT_CODES.get(c, c) for c in sorted(exact))
-        return [
+        notes = [
             Note(
                 kind="match",
                 field="applicant_codes",
                 text=f"The call names your applicant type as eligible: {names}.",
             )
         ]
+        if applicant.applicant_type is ApplicantType.INFORMAL_GROUP:
+            notes.append(
+                Note(
+                    kind="caution",
+                    field="applicant_type",
+                    text=(
+                        "This call is open to individuals, so one member of your group would "
+                        "have to be the named applicant and hold the award personally. The "
+                        "group itself cannot be the recipient."
+                    ),
+                )
+            )
+        return notes
 
     ambiguous = AMBIGUOUS_CODES & set(opp.applicant_codes)
     if ambiguous:
@@ -260,13 +273,20 @@ def _check_amount(applicant: Applicant, opp: Opportunity) -> list[Note]:
         ]
 
     if opp.award_floor is not None and want < opp.award_floor:
+        # Asking far below the floor is not a project that needs rescoping, it
+        # is a different programme -- treat it the same way as a far over-ask.
+        far_below = want * AMOUNT_NEAR_MISS_FACTOR < opp.award_floor
         return [
             Note(
-                kind="caution",
+                kind="blocker" if far_below else "caution",
                 field="award_floor",
                 text=(
                     f"You are seeking ${want:,}; the smallest award is ${opp.award_floor:,}. "
-                    "You may need to widen the project scope."
+                    + (
+                        "This call funds work at a scale far larger than your project."
+                        if far_below
+                        else "You may need to widen the project scope."
+                    )
                 ),
             )
         ]
