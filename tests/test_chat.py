@@ -237,7 +237,7 @@ def test_a_retired_model_falls_back_to_an_alternate(api_key):
         model = url.split("/models/")[1].split(":")[0]
         seen.append(model)
         if model == chat.DEFAULT_MODEL:
-            return httpx.Response(200, json={"error": {"message": "model not found"}})
+            return httpx.Response(404, text="This model is no longer available.")
         return gemini_reply("ok", {"country": "US"})
 
     reply, answers, _ = chat.turn([], {}, client=client_returning(handler))
@@ -416,3 +416,219 @@ def test_all_invalid_countries_leave_the_field_unanswered(api_key):
 
     _, answers, _ = chat.turn([], {}, client=client_returning(handler))
     assert "work_countries" not in answers
+
+
+# --- reliability ------------------------------------------------------------
+
+
+def test_a_rate_limit_is_waited_out_not_reported_as_broken(api_key, monkeypatch):
+    """One turn per message plus a free-tier quota means 429 is routine."""
+    monkeypatch.setattr(chat.time, "sleep", lambda *_: None)
+    calls = {"n": 0}
+
+    def handler(request):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return httpx.Response(429, json={"error": {"message": "quota", "details": [
+                {"@type": "type.googleapis.com/google.rpc.RetryInfo", "retryDelay": "3s"},
+            ]}})
+        return gemini_reply("recovered", {"country": "US"})
+
+    reply, _, _ = chat.turn([], {}, client=client_returning(handler))
+    assert reply == "recovered"
+    assert calls["n"] == 2
+
+
+def test_the_delay_the_api_asks_for_is_used(api_key):
+    response = httpx.Response(429, json={"error": {"details": [
+        {"retryDelay": "7s"},
+    ]}})
+    assert chat._retry_after(response, 0) == 7.5
+
+
+def test_a_retry_after_header_is_honoured(api_key):
+    response = httpx.Response(503, headers={"retry-after": "4"}, text="busy")
+    assert chat._retry_after(response, 0) == 4.0
+
+
+def test_a_persistent_rate_limit_is_flagged_retryable(api_key, monkeypatch):
+    monkeypatch.setattr(chat.time, "sleep", lambda *_: None)
+
+    def handler(request):
+        return httpx.Response(429, text="quota exceeded")
+
+    with pytest.raises(chat.ChatUnavailable) as caught:
+        chat.turn([], {}, client=client_returning(handler))
+    assert caught.value.retryable is True
+    assert "429" in str(caught.value)
+
+
+def test_a_rate_limit_does_not_switch_model(api_key, monkeypatch):
+    """The quota belongs to the key, so another model wastes a call and hides why."""
+    monkeypatch.setattr(chat.time, "sleep", lambda *_: None)
+    monkeypatch.setattr(chat, "_resolved_model", None)
+    seen: list[str] = []
+
+    def handler(request):
+        url = str(request.url)
+        if "/models/" not in url:
+            raise AssertionError("must not go looking for models on a rate limit")
+        seen.append(url.split("/models/")[1].split(":")[0])
+        return httpx.Response(429, text="quota exceeded")
+
+    with pytest.raises(chat.ChatUnavailable):
+        chat.turn([], {}, client=client_returning(handler))
+    assert set(seen) == {chat.DEFAULT_MODEL}
+
+
+def test_the_first_error_is_reported_not_the_last(api_key, monkeypatch):
+    """A rate limit on the real model must not surface as a 404 from a fallback."""
+    monkeypatch.setattr(chat.time, "sleep", lambda *_: None)
+
+    def handler(request):
+        return httpx.Response(429, text="quota exceeded on gemini-flash-latest")
+
+    with pytest.raises(chat.ChatUnavailable, match="429"):
+        chat.turn([], {}, client=client_returning(handler))
+
+
+def test_no_retired_model_names_are_hard_coded():
+    """A dead name costs a call and reports a 404 from the wrong model."""
+    assert "gemini-2.0-flash" not in chat.MODEL_CANDIDATES
+    assert "gemini-2.5-flash" not in chat.MODEL_CANDIDATES
+
+
+def test_a_transient_network_error_is_retried(api_key, monkeypatch):
+    monkeypatch.setattr(chat.time, "sleep", lambda *_: None)
+    calls = {"n": 0}
+
+    def handler(request):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise httpx.ConnectError("dns hiccup")
+        return gemini_reply("recovered", {"country": "US"})
+
+    reply, _, _ = chat.turn([], {}, client=client_returning(handler))
+    assert reply == "recovered" and calls["n"] == 2
+
+
+def test_a_busy_response_is_marked_retryable_for_the_page(web, api_key, monkeypatch):
+    def busy(*a, **k):
+        raise chat.ChatUnavailable("rate limited by Gemini (429)", retryable=True)
+
+    monkeypatch.setattr(app_module.chat, "turn", busy)
+    response = web.post("/chat/message", json={"messages": [], "answers": {}})
+    assert response.status_code == 503
+    body = response.json()
+    assert body["retryable"] is True
+    assert "busy" in body["error"].lower()
+    assert "429" not in body["error"]  # the detail stays in the log
+
+
+def test_a_permanent_failure_is_not_marked_retryable(web, api_key, monkeypatch):
+    def broken(*a, **k):
+        raise chat.ChatUnavailable("no API key configured (set GEMINI_API_KEY)")
+
+    monkeypatch.setattr(app_module.chat, "turn", broken)
+    body = web.post("/chat/message", json={"messages": [], "answers": {}}).json()
+    assert body["retryable"] is False
+    assert "use the form" in body["error"]
+
+
+def test_the_page_retries_a_busy_turn_before_giving_up(web, api_key):
+    """The browser waits out a rate limit rather than reporting it as broken."""
+    page = web.get("/chat").text
+    assert "data.retryable" in page
+    assert "Busy — retrying" in page
+
+
+def _daily_quota_response() -> httpx.Response:
+    return httpx.Response(429, json={"error": {"code": 429, "message": "quota", "details": [
+        {"@type": "type.googleapis.com/google.rpc.QuotaFailure", "violations": [
+            {"quotaId": "GenerateRequestsPerDayPerProjectPerModel-FreeTier", "quotaValue": "20"},
+        ]},
+        {"@type": "type.googleapis.com/google.rpc.RetryInfo", "retryDelay": "59s"},
+    ]}})
+
+
+def test_a_daily_per_model_cap_moves_to_another_model(api_key, monkeypatch):
+    """The free tier charges 20 requests per day per model, so the next has its own."""
+    monkeypatch.setattr(chat.time, "sleep", lambda *_: None)
+    monkeypatch.setattr(chat, "_resolved_model", None)
+    seen: list[str] = []
+
+    def handler(request):
+        url = str(request.url)
+        if "/models/" not in url:
+            return httpx.Response(200, json={"models": []})
+        model = url.split("/models/")[1].split(":")[0]
+        seen.append(model)
+        if model == chat.DEFAULT_MODEL:
+            return _daily_quota_response()
+        return gemini_reply("second model", {"country": "US"})
+
+    reply, _, _ = chat.turn([], {}, client=client_returning(handler))
+    assert reply == "second model"
+    assert seen[0] == chat.DEFAULT_MODEL and len(seen) > 1
+
+
+def test_a_daily_cap_is_not_waited_out(api_key, monkeypatch):
+    """Its retryDelay says a minute, but the counter resets at midnight."""
+    slept: list[float] = []
+    monkeypatch.setattr(chat.time, "sleep", lambda s: slept.append(s))
+
+    def handler(request):
+        if "/models/" not in str(request.url):
+            return httpx.Response(200, json={"models": []})
+        return _daily_quota_response()
+
+    with pytest.raises(chat.ChatUnavailable):
+        chat.turn([], {}, client=client_returning(handler))
+    assert slept == []
+
+
+def test_exhausting_every_model_says_so_and_is_not_retryable(api_key, monkeypatch):
+    monkeypatch.setattr(chat.time, "sleep", lambda *_: None)
+    monkeypatch.setattr(chat, "_resolved_model", None)
+
+    def handler(request):
+        if "/models/" not in str(request.url):
+            return httpx.Response(200, json={"models": []})
+        return _daily_quota_response()
+
+    with pytest.raises(chat.ChatUnavailable) as caught:
+        chat.turn([], {}, client=client_returning(handler))
+    assert caught.value.retryable is False
+    assert "daily free-tier quota" in str(caught.value)
+
+
+def test_a_per_minute_limit_is_still_waited_out(api_key, monkeypatch):
+    """Only the per-day cap skips the wait; a burst limit clears in seconds."""
+    monkeypatch.setattr(chat.time, "sleep", lambda *_: None)
+    calls = {"n": 0}
+
+    def handler(request):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return httpx.Response(429, json={"error": {"details": [
+                {"@type": "type.googleapis.com/google.rpc.QuotaFailure", "violations": [
+                    {"quotaId": "GenerateRequestsPerMinutePerProjectPerModel-FreeTier"},
+                ]},
+            ]}})
+        return gemini_reply("recovered", {"country": "US"})
+
+    reply, _, _ = chat.turn([], {}, client=client_returning(handler))
+    assert reply == "recovered"
+
+
+def test_an_exhausted_daily_quota_does_not_promise_it_will_work_shortly(web, api_key, monkeypatch):
+    def exhausted(*a, **k):
+        raise chat.ChatUnavailable(
+            "daily free-tier quota exhausted on every available model", retryable=False
+        )
+
+    monkeypatch.setattr(app_module.chat, "turn", exhausted)
+    body = web.post("/chat/message", json={"messages": [], "answers": {}}).json()
+    assert "today's free allowance" in body["error"]
+    assert body["retryable"] is False
+    assert "moment" not in body["error"]  # would be untrue: it resets daily

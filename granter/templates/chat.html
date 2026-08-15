@@ -95,6 +95,28 @@
     submitForm.submit();
   }
 
+  const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+  // A free-tier key runs out of quota per minute, and a conversation spends one
+  // request per turn -- so "busy" is routine and clears by itself. Waiting is a
+  // better answer than telling someone the assistant is down.
+  async function send_turn(attempt) {
+    const response = await fetch("/chat/message", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ messages: messages, answers: answers }),
+    });
+    const data = await response.json();
+
+    if (!response.ok && data.retryable && attempt < 3) {
+      const wait = 3000 * attempt;
+      statusLine.textContent = "Busy — retrying in " + (wait / 1000) + "s…";
+      await sleep(wait);
+      return send_turn(attempt + 1);
+    }
+    return { ok: response.ok, data: data };
+  }
+
   document.getElementById("chat-form").addEventListener("submit", async function (event) {
     event.preventDefault();
     const text = entry.value.trim();
@@ -107,17 +129,16 @@
     statusLine.textContent = "Thinking…";
 
     try {
-      const response = await fetch("/chat/message", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ messages: messages, answers: answers }),
-      });
-      const data = await response.json();
+      const { ok, data } = await send_turn(1);
 
-      if (!response.ok) {
-        statusLine.textContent = data.error || "The assistant is unavailable.";
-        bubble("assistant", "I can't reach the assistant right now. " +
-                            "You can still use the form, which gives the same results.");
+      if (!ok) {
+        statusLine.textContent = "";
+        // The message stays in history, so sending again resumes the
+        // conversation rather than starting it over.
+        bubble("assistant", (data.error || "I can't reach the assistant right now.") +
+                            (data.retryable
+                              ? " Send your message again in a moment, or use the form."
+                              : " You can still use the form, which gives the same results."));
         return;
       }
 

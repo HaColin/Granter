@@ -72,6 +72,14 @@ has been renamed, it tries alternates and tells you which to use.
 Without a key, `/chat` says so and points at the form. The form is never gated behind
 the model.
 
+**Free-tier quota is the thing that will bite you.** Google's free tier allows 20
+requests per day *per model*, and a conversation spends one per turn — so the chat
+stops after a handful of messages. Granter handles the three cases differently: a
+per-minute burst limit is waited out, a per-day cap moves to another model (each has its
+own allowance), and when every model is spent it says the daily allowance is used up
+rather than claiming to be broken or promising it will work in a moment. The form has no
+such limit.
+
 **The model fills in the form and does nothing else.** It has no access to grant data,
 never names a grant or a deadline, and never decides eligibility — the structured
 response schema it is constrained to contains exactly the survey's own fields and

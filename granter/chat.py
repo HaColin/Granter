@@ -21,6 +21,7 @@ import json
 import os
 import re
 import sys
+import time
 from typing import Any
 
 import httpx
@@ -43,7 +44,97 @@ _BOOL_FIELDS = ("has_fiscal_sponsor", "grants_gov_account")
 
 
 class ChatUnavailable(RuntimeError):
-    """No API key, or the provider could not be reached."""
+    """No API key, or the provider could not be reached.
+
+    ``retryable`` separates "this will work again shortly" -- a rate limit, a
+    brief 503 -- from "this will fail identically next time". The first is the
+    common case on a free tier and should not be reported as the assistant
+    being down.
+    """
+
+    def __init__(self, message: str, *, retryable: bool = False) -> None:
+        super().__init__(message)
+        self.retryable = retryable
+
+
+#: Statuses worth trying again rather than failing on. 429 is the one that
+#: matters: a conversation makes one request per turn, and a free-tier key runs
+#: out of quota per minute, so the second or third turn is where it bites.
+RETRYABLE_STATUS = frozenset({408, 429, 500, 502, 503, 504})
+MAX_CALL_ATTEMPTS = 3
+BASE_BACKOFF_SECONDS = 2.0
+MAX_BACKOFF_SECONDS = 20.0
+
+
+def _retry_after(response: httpx.Response, attempt: int) -> float:
+    """How long to wait, preferring the delay the API itself asks for."""
+    try:
+        for detail in response.json().get("error", {}).get("details", []):
+            delay = str(detail.get("retryDelay") or "")
+            if delay.endswith("s") and delay[:-1].replace(".", "", 1).isdigit():
+                return min(float(delay[:-1]) + 0.5, MAX_BACKOFF_SECONDS)
+    except (ValueError, AttributeError, TypeError):
+        pass
+
+    header = response.headers.get("retry-after")
+    if header and header.isdigit():
+        return min(float(header), MAX_BACKOFF_SECONDS)
+
+    return min(BASE_BACKOFF_SECONDS * (2**attempt), MAX_BACKOFF_SECONDS)
+
+
+def _quota_violations(response: httpx.Response) -> list[str]:
+    """The quota ids named in a 429 body, if it names any."""
+    try:
+        details = response.json().get("error", {}).get("details", [])
+    except (ValueError, AttributeError):
+        return []
+    ids = []
+    for detail in details:
+        for violation in detail.get("violations", []) or []:
+            quota_id = violation.get("quotaId")
+            if quota_id:
+                ids.append(str(quota_id))
+    return ids
+
+
+def _is_daily_model_quota(exc: Exception) -> bool:
+    """A per-day, per-model cap -- the free tier's 20 requests per model per day.
+
+    Waiting does not clear this one; the counter resets at midnight Pacific. But
+    the quota is charged per model, so another model has its own allowance, and
+    switching is the only thing that helps. The API's own retryDelay of about a
+    minute is misleading here.
+    """
+    if not isinstance(exc, httpx.HTTPStatusError) or exc.response.status_code != 429:
+        return False
+    return any(
+        "PerDay" in quota_id and "PerModel" in quota_id
+        for quota_id in _quota_violations(exc.response)
+    )
+
+
+def _is_model_problem(exc: Exception) -> bool:
+    """Whether trying a different model could help.
+
+    A retired name, a typo, or a model this key cannot use. A rate limit is not
+    one of these -- the quota belongs to the key, so switching model wastes a
+    call and buries the real reason behind a 404 from some other name.
+    """
+    if isinstance(exc, httpx.HTTPStatusError):
+        if exc.response.status_code not in (400, 403, 404):
+            return False
+        body = exc.response.text.lower()
+        return any(
+            phrase in body
+            # "is no longer available to new users" is the live wording for a
+            # retired model, and does not contain "not available".
+            for phrase in (
+                "not found", "not available", "no longer available",
+                "not supported", "unknown name",
+            )
+        )
+    return False
 
 
 def api_key() -> str | None:
@@ -197,18 +288,41 @@ def _call_gemini(
     owned = client is None
     client = client or httpx.Client(timeout=60.0)
     try:
-        response = client.post(
-            f"{API_BASE}/{model}:generateContent",
-            params={"key": key},
-            json=body,
-        )
-        response.raise_for_status()
-        payload = response.json()
+        payload = None
+        for attempt in range(MAX_CALL_ATTEMPTS):
+            try:
+                response = client.post(
+                    f"{API_BASE}/{model}:generateContent",
+                    params={"key": key},
+                    json=body,
+                )
+            except httpx.TransportError:
+                if attempt == MAX_CALL_ATTEMPTS - 1:
+                    raise
+                time.sleep(min(BASE_BACKOFF_SECONDS * (2**attempt), MAX_BACKOFF_SECONDS))
+                continue
+
+            daily_cap = response.status_code == 429 and any(
+                "PerDay" in q and "PerModel" in q for q in _quota_violations(response)
+            )
+            if (
+                response.status_code in RETRYABLE_STATUS
+                and attempt < MAX_CALL_ATTEMPTS - 1
+                and not daily_cap  # waiting cannot clear a per-day cap
+            ):
+                time.sleep(_retry_after(response, attempt))
+                continue
+
+            response.raise_for_status()
+            payload = response.json()
+            break
+        else:
+            response.raise_for_status()
     finally:
         if owned:
             client.close()
 
-    return _parse_payload(payload, model)
+    return _parse_payload(payload or {}, model)
 
 
 #: JSON wrapped in a markdown fence, which models emit even under a schema.
@@ -348,31 +462,36 @@ def turn(
     attempts = [_resolved_model or model]
     attempts += [m for m in MODEL_CANDIDATES if m not in attempts]
 
-    last_error: Exception | None = None
+    # The first failure is the informative one. Reporting the last meant
+    # reporting whatever the final fallback said -- which is how a rate limit on
+    # the working model surfaced as a 404 from a different, retired one.
+    first_error: Exception | None = None
     parsed = None
-    for index, candidate in enumerate(attempts):
+    index = 0
+    while index < len(attempts):
+        candidate = attempts[index]
+        index += 1
         try:
             parsed = _call_gemini(messages, model=candidate, key=key, client=client)
             _resolved_model = candidate
             break
         except (ChatUnavailable, httpx.HTTPError) as exc:
-            last_error = exc
-            # Once the built-in names are exhausted, ask the API what this key
-            # can actually call rather than guessing at another name.
-            if index == len(attempts) - 1:
+            first_error = first_error or exc
+
+            # Another model helps in two cases: this one is retired, or this
+            # one's own daily allowance is spent (the free tier charges 20
+            # requests per day *per model*, so the next model starts fresh).
+            # A per-minute limit is not one of them -- that is waited out above.
+            if not (_is_model_problem(exc) or _is_daily_model_quota(exc)):
+                break
+
+            if index == len(attempts):
                 discovered = resolve_model(key, client)
                 if discovered and discovered not in attempts:
                     attempts.append(discovered)
 
     if parsed is None:
-        if isinstance(last_error, httpx.HTTPStatusError):
-            detail = last_error.response.text[:200].replace("\n", " ")
-            raise ChatUnavailable(
-                f"Gemini returned {last_error.response.status_code}: {detail}"
-            ) from last_error
-        if isinstance(last_error, httpx.HTTPError):
-            raise ChatUnavailable(f"could not reach Gemini: {last_error}") from last_error
-        raise last_error or ChatUnavailable("no model responded")
+        raise _as_chat_error(first_error)
 
     reply = str(parsed.get("reply") or "").strip() or "Could you tell me a bit more?"
     merged = merge_answers(answers, parsed.get("answers") or {})
@@ -388,7 +507,9 @@ def turn(
 
 
 #: Tried in order before falling back to asking the API what exists.
-MODEL_CANDIDATES = (DEFAULT_MODEL, "gemini-2.0-flash", "gemini-flash-lite-latest")
+#: Only names believed current. A retired name here costs a wasted call and
+#: reports a 404 from the wrong model; discovery handles renames properly.
+MODEL_CANDIDATES = (DEFAULT_MODEL, "gemini-flash-lite-latest")
 
 #: Resolved model for this process, once something has been shown to work.
 _resolved_model: str | None = None
@@ -492,6 +613,31 @@ def check(client: httpx.Client | None = None) -> int:
 
     print("\nNo model worked. The form at / still does, and needs no key.")
     return 1
+
+
+def _as_chat_error(exc: Exception | None) -> ChatUnavailable:
+    """Classify a provider failure, keeping whether it is worth retrying."""
+    if isinstance(exc, ChatUnavailable):
+        return exc
+    if isinstance(exc, httpx.HTTPStatusError):
+        status = exc.response.status_code
+        detail = exc.response.text[:200].replace("\n", " ")
+        if status == 429:
+            if _is_daily_model_quota(exc):
+                return ChatUnavailable(
+                    "daily free-tier quota exhausted on every available model "
+                    f"(20 requests per model per day): {detail}",
+                    retryable=False,
+                )
+            return ChatUnavailable(
+                f"rate limited by Gemini (429): {detail}", retryable=True
+            )
+        return ChatUnavailable(
+            f"Gemini returned {status}: {detail}", retryable=status in RETRYABLE_STATUS
+        )
+    if isinstance(exc, httpx.HTTPError):
+        return ChatUnavailable(f"could not reach Gemini: {exc}", retryable=True)
+    return ChatUnavailable("no model responded", retryable=True)
 
 
 def humanise(answers: Answers) -> list[tuple[str, str]]:

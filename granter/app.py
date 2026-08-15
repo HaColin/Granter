@@ -116,8 +116,24 @@ async def chat_message(request: Request) -> JSONResponse:
         # whoever runs this, meaningless or alarming to the person using it. It
         # goes to the server log; the browser gets the one thing that helps.
         logger.warning("chat turn failed: %s", exc)
+        retryable = getattr(exc, "retryable", False)
+        # "Try again in a moment" would be false for a daily cap: it does not
+        # clear until the counter resets. Say what is actually true.
+        exhausted = "daily free-tier quota" in str(exc)
         return JSONResponse(
-            {"error": "The assistant is unavailable right now. Please use the form instead."},
+            {
+                "error": (
+                    "The assistant has used up today's free allowance. Please use the "
+                    "form — it gives exactly the same results."
+                    if exhausted
+                    else "The assistant is busy for a moment."
+                    if retryable
+                    else "The assistant is unavailable right now. Please use the form instead."
+                ),
+                # A rate limit is the routine case on a free-tier key and clears
+                # on its own, so the page waits rather than giving up.
+                "retryable": retryable,
+            },
             status_code=503,
         )
 
