@@ -100,7 +100,7 @@ Granter runs as an MCP server, so Claude can search real opportunities instead o
 recalling programme names that may not exist:
 
 ```bash
-claude mcp add granter -- python C:\path	o\Granter\granter_mcp.py
+claude mcp add granter -- python "C:\Users\you\Granter\granter_mcp.py"
 ```
 
 Use `granter_mcp.py` with an absolute path, not `python -m granter.mcp_server`: a client
@@ -118,7 +118,7 @@ started from this directory. For Claude Desktop, add the same command to
   "mcpServers": {
     "granter": {
       "command": "python",
-      "args": ["C:\path\to\Granter\granter_mcp.py"]
+      "args": ["C:\\Users\\you\\Granter\\granter_mcp.py"]
     }
   }
 }
